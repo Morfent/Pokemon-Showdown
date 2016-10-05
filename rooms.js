@@ -13,8 +13,8 @@
 
 const TIMEOUT_EMPTY_DEALLOCATE = 10 * 60 * 1000;
 const TIMEOUT_INACTIVE_DEALLOCATE = 40 * 60 * 1000;
-const REPORT_USER_STATS_INTERVAL = 10 * 60 * 1000;
-const PERIODIC_MATCH_INTERVAL = 60 * 1000;
+const REPORT_USER_STATS_TIMEOUT = 10 * 60 * 1000;
+const PERIODIC_MATCH_TIMEOUT = 60 * 1000;
 
 const CRASH_REPORT_THROTTLE = 60 * 60 * 1000;
 
@@ -364,14 +364,14 @@ class GlobalRoom {
 		this.maxUsers = 0;
 		this.maxUsersDate = 0;
 
-		this.reportUserStatsInterval = setInterval(
+		this.reportUserStatsTimeout = setTimeout(
 			() => this.reportUserStats(),
-			REPORT_USER_STATS_INTERVAL
+			REPORT_USER_STATS_TIMEOUT
 		);
 
-		this.periodicMatchInterval = setInterval(
+		this.periodicMatchTimeout = setTimeout(
 			() => this.periodicMatch(),
-			PERIODIC_MATCH_INTERVAL
+			PERIODIC_MATCH_TIMEOUT
 		);
 
 		// Create writestream for modlog
@@ -386,10 +386,16 @@ class GlobalRoom {
 			}, () => {});
 			this.maxUsersDate = 0;
 		}
+
 		LoginServer.request('updateuserstats', {
 			date: Date.now(),
 			users: this.userCount,
 		}, () => {});
+
+		this.reportUserStatsTimeout = setTimeout(
+			() => this.reportUserStats(),
+			REPORT_USER_STATS_TIMEOUT
+		);
 	}
 
 	get formatListText() {
@@ -580,10 +586,15 @@ class GlobalRoom {
 					formatSearches.splice(i, 1);
 					formatSearches.splice(0, 1);
 					this.startBattle(searchUser, longestSearcher, formatid, search.team, longestSearch.team, {rated: minRating});
-					return;
+					break;
 				}
 			}
 		}
+
+		this.periodicMatchTimeout = setTimeout(
+			() => this.periodicMatch(),
+			PERIODIC_MATCH_TIMEOUT
+		);
 	}
 	checkModjoin() {
 		return true;
