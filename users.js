@@ -1610,3 +1610,20 @@ Users.socketReceive = function (worker, workerid, socketid, message) {
 		Monitor.warn(`[slow] ${deltaTime}ms - ${user.name} <${connection.ip}>: ${roomId}|${message}`);
 	}
 };
+
+/**
+ * @description Clears all connections whose sockets were contained by a
+ * worker. Called after a worker's process crashes or gets killed.
+ * @param {object} worker
+ * @returns {number}
+ */
+Users.socketDisconnectAll = function (worker) {
+	let count = 0;
+	connections.forEach(connection => {
+		if (connection.worker === worker) {
+			Users.socketDisconnect(worker, worker.id, connection.socketid);
+			count++;
+		}
+	});
+	return count;
+};

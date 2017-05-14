@@ -2,6 +2,8 @@
 'use strict';
 
 const child_process = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 // Make sure we're Node 6+
 
@@ -20,6 +22,78 @@ try {
 } catch (e) {
 	console.log('Installing dependencies...');
 	child_process.execSync('npm install --production', {stdio: 'inherit'});
+}
+
+// Check if the server is configured to use Go, and ensure the required
+// environment variables and dependencies are available if that is the case
+
+let config;
+try {
+	config = require('./config/config');
+} catch (e) {}
+
+if (config && config.golang) {
+	if (!process.env.GOPATH) {
+		console.log('The GOPATH environment variable is not set! It is required in order to run the server using Go.');
+		process.exit(0);
+	}
+	if (!process.env.GOROOT) {
+		console.log('The GOROOT environment variable is not set! It is required in order to run the server using Go.');
+		process.exit(0);
+	}
+
+	const dependencies = ['github.com/gorilla/mux', 'github.com/igm/sockjs-go/sockjs'];
+	let packages = child_process.execSync('go list all', {stdio: null, encoding: 'utf8'});
+	for (let dep of dependencies) {
+		if (!packages.includes(dep)) {
+			console.log(`Dependency ${dep} is not installed. Fetching...`);
+			child_process.execSync(`go get ${dep}`, {stdio: 'inherit'});
+		}
+	}
+
+	const {GOPATH} = process.env;
+	let stat;
+	let needsSrcDir = false;
+	try {
+		stat = fs.lstatSync(path.resolve(GOPATH, 'src/github.com/Zarel'));
+	} catch (e) {
+		needsSrcDir = true;
+	} finally {
+		if (stat && !stat.isDirectory()) {
+			needsSrcDir = true;
+		}
+	}
+
+	if (needsSrcDir) {
+		try {
+			fs.mkdirSync(path.resolve(GOPATH, 'src/github.com/Zarel'));
+		} catch (e) {
+			console.error(`Cannot make go source directory for the sockets library files! Symlink them manually from ${__dirname} to ${path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown/')}`);
+			process.exit(0);
+		}
+	}
+
+	try {
+		stat = fs.lstatSync(path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown'));
+	} catch (e) {}
+
+	if (!stat || !stat.isSymbolicLink()) {
+		try {
+			// FIXME: does this even work on Windows? Check to see if `mklink /J`
+			// might be needed instead
+			fs.symlink(__dirname, path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown'));
+		} catch (e) {
+			console.error(`Cannot make go source directory for the sockets library files! Symlink them manually from ${__dirname} to ${path.resolve(GOPATH, './src/github.com/Zarel/Pokemon-Showdown/')}`);
+			process.exit(0);
+		}
+	}
+
+	console.log('Building Go source libs...');
+	try {
+		child_process.execSync('go install github.com/Zarel/Pokemon-Showdown/sockets', {stdio: 'inherit'});
+	} catch (e) {
+		process.exit(0);
+	}
 }
 
 // Start the server. We manually load app.js so it can be configured to run as

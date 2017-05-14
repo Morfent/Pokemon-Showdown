@@ -10,6 +10,13 @@ exports.port = 8000;
 //   know what you are doing.
 exports.proxyip = false;
 
+// Go language - whether or not to use Go instead of Node.js to host the static
+//	 and SockJS servers. Go is more likely to be more performant than Node.js for
+//	 this purpose, but this should be kept set to false unless you're capable of
+//	 debugging any issues that may arise due to the additional complexity of
+//	 the code needed for this to run.
+exports.golang = false;
+
 // Pokemon of the Day - put a pokemon's name here to make it Pokemon of the Day
 //   The PotD will always be in the #2 slot (not #1 so it won't be a lead)
 //   in every Random Battle team.

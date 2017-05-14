@@ -7,11 +7,13 @@
         "allowJs": true,
         "checkJs": true
     },
-    "types": ["node"],
+    "types": ["node", "sockjs-node"],
     "include": [
         "./dev-tools/globals.ts",
         "./sim/dex-data.js",
         "./sim/dex.js",
-        "./sim/prng.js"
+        "./sim/prng.js",
+        "./sockets.js",
+        "./sockets-workers.js"
     ]
 }
