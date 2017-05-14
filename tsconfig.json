@@ -15,7 +15,9 @@
         "./sim/prng.js",
         "./crashlogger.js",
         "./dnsbl.js",
+        "./fs.js",
         "./repl.js",
-        "./fs.js"
+        "./sockets.js",
+        "./sockets-workers.js"
     ]
 }
