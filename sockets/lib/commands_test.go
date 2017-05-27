@@ -7,7 +7,7 @@ type testTarget struct {
 }
 
 func TestCommands(t *testing.T) {
-	tokens := []string{
+	tokens := []byte{
 		SOCKET_CONNECT,
 		SOCKET_DISCONNECT,
 		SOCKET_RECEIVE,
@@ -20,7 +20,7 @@ func TestCommands(t *testing.T) {
 
 	cmds := make([]Command, len(tokens))
 	for i, token := range tokens {
-		cmds[i] = NewCommand(token+"1\n2\n3\n4", testTarget{})
+		cmds[i] = NewCommand(string(token)+"1\n2\n3\n4", testTarget{})
 	}
 	for _, cmd := range cmds {
 		params := cmd.Params()

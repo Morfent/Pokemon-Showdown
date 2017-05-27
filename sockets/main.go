@@ -37,6 +37,7 @@ func main() {
 	conn.Listen(smux)
 
 	// Set up server routing.
+	// FIXME: this doesn't route correctly on Windows. Fix it!!
 	r := mux.NewRouter()
 
 	avatarDir, _ := filepath.Abs("./config/avatars")
