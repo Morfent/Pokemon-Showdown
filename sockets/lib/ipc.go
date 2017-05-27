@@ -25,6 +25,9 @@ func NewConnection(envVar string) (c *Connection, err error) {
 		return nil, fmt.Errorf("Sockets: failed to parse TCP address to connect to the parent process with: %v", err)
 	}
 
+	// IPv6 is perfectly fine to use here if the machine running this supports
+	// it. The HTTP(S) server can't use it because PS is dependent on user IPs
+	// exclusively being IPv4.
 	conn, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
 		return nil, fmt.Errorf("Sockets: failed to connect to TCP server: %v", err)

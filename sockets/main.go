@@ -10,12 +10,12 @@ import (
 
 	"github.com/Zarel/Pokemon-Showdown/sockets/lib"
 
-	routing "github.com/gorilla/mux"
+	"github.com/gorilla/mux"
 	"github.com/igm/sockjs-go/sockjs"
 )
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/404.html", http.StatusSeeOther)
+	http.Redirect(w, r, "/static/404.html", http.StatusSeeOther)
 }
 
 func main() {
@@ -27,7 +27,7 @@ func main() {
 	}
 
 	// Instantiate the socket multiplexer and IPC struct..
-	mux := sockets.NewMultiplexer()
+	smux := sockets.NewMultiplexer()
 	conn, err := sockets.NewConnection("PS_IPC_PORT")
 	if err != nil {
 		log.Fatal(err)
@@ -37,14 +37,11 @@ func main() {
 	// Begin listening for incoming messages from sockets and the TCP
 	// connection to the parent process. For now, they'll just get enqueued
 	// for workers to manage later..
-	mux.Listen(conn)
-	err = conn.Listen(mux)
-	if err != nil {
-		log.Fatal("%v", err)
-	}
+	smux.Listen(conn)
+	conn.Listen(smux)
 
 	// Set up server routing.
-	r := routing.NewRouter()
+	r := mux.NewRouter()
 
 	avatarDir, _ := filepath.Abs("./config/avatars")
 	r.PathPrefix("/avatars/").
@@ -62,10 +59,11 @@ func main() {
 		JSessionID:      sockjs.DefaultOptions.JSessionID}
 
 	r.PathPrefix("/showdown").
-		Handler(sockjs.NewHandler("/showdown", opts, mux.Handler))
+		Handler(sockjs.NewHandler("/showdown", opts, smux.Handler))
 
-	staticDir, _ := filepath.Abs("/static")
-	r.Handle("/", http.StripPrefix("/static", http.FileServer(http.Dir(staticDir))))
+	staticDir, _ := filepath.Abs("./static")
+	r.PathPrefix("/static/").
+		Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
 
 	r.NotFoundHandler = http.HandlerFunc(notFoundHandler)
 
@@ -82,6 +80,7 @@ func main() {
 				Addr:      ba + port,
 				TLSConfig: &tls.Config{Certificates: []tls.Certificate{certs}}}
 
+			// IPv6 is verboten until PS can support it.
 			var ln net.Listener
 			ln, err = tls.Listen("tcp4", srv.Addr, srv.TLSConfig)
 			defer ln.Close()
@@ -90,7 +89,11 @@ func main() {
 			}
 
 			fmt.Printf("Sockets: now serving on https://%v%v/\n", ba, port)
-			log.Fatal(http.Serve(ln, r))
+
+			// This will block indefinitely until http.Serve returns an error.
+			if err := http.Serve(ln, r); err != nil {
+				log.Fatalf("Sockets: HTTPS server failed: %v", err)
+			}
 		}(config.BindAddress, config.SSL.Port, config.SSL.Options.Cert, config.SSL.Options.Key)
 	}
 
@@ -100,14 +103,24 @@ func main() {
 			Handler: r,
 			Addr:    ba + port}
 
-		ln, err := net.Listen("tcp4", srv.Addr)
+		// Again, IPv6 is verboten until PS can support it.
+		addr, err := net.ResolveTCPAddr("tcp4", ba+port)
+		if err != nil {
+			log.Fatalf("Sockets: failed to resolve the TCP address of the parent's server: %v", err)
+		}
+
+		ln, err := net.ListenTCP("tcp4", addr)
 		defer ln.Close()
 		if err != nil {
 			log.Fatalf("Sockets: failed to listen on %v over HTTP", srv.Addr)
 		}
 
 		fmt.Printf("Sockets: now serving on http://%v%v/\n", ba, port)
-		log.Fatal(http.Serve(ln, r))
+
+		// This will block indefinitely until http.Serve returns an error.
+		if err = http.Serve(ln, r); err != nil {
+			log.Fatalf("Sockets: HTTP server failed with error: %v", err)
+		}
 	}(config.BindAddress, config.Port)
 
 	// Finally, spawn workers.to pipe messages received at the multiplexer or

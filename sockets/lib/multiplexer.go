@@ -167,7 +167,9 @@ func (m *Multiplexer) socketSend(sid string, msg string) error {
 		return nil
 	}
 
-	return fmt.Errorf("Sockets: attempted to send to socket of ID %v, which does not exist", sid)
+	// This can happen occasionally on disconnect. Probably a race condition in
+	// the parent process.
+	return fmt.Errorf("Sockets: attempted to send to non-existent socket of ID %v: %v", sid, msg)
 }
 
 func (m *Multiplexer) channelAdd(cid string, sid string) error {
