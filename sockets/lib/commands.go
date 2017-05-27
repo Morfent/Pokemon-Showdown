@@ -15,19 +15,21 @@ package sockets
 import "strings"
 
 // IPC message types
-const SOCKET_CONNECT string = "*"
-const SOCKET_DISCONNECT string = "!"
-const SOCKET_RECEIVE string = "<"
-const SOCKET_SEND string = ">"
-const CHANNEL_ADD string = "+"
-const CHANNEL_REMOVE string = "-"
-const CHANNEL_BROADCAST string = "#"
-const SUBCHANNEL_MOVE string = "."
-const SUBCHANNEL_BROADCAST string = ":"
+const (
+	SOCKET_CONNECT       byte = '*'
+	SOCKET_DISCONNECT    byte = '!'
+	SOCKET_RECEIVE       byte = '<'
+	SOCKET_SEND          byte = '>'
+	CHANNEL_ADD          byte = '+'
+	CHANNEL_REMOVE       byte = '-'
+	CHANNEL_BROADCAST    byte = '#'
+	SUBCHANNEL_MOVE      byte = '.'
+	SUBCHANNEL_BROADCAST byte = ':'
+)
 
 type Command struct {
 	// The first character of the message. This signifies the command type.
-	token string
+	token byte
 	// The message with the token removed.
 	paramstr string
 	// The number of parametres in the paramstr. Necessary, since messages
@@ -47,11 +49,7 @@ type CommandIO interface {
 	Process(Command) (err error)
 }
 
-func NewCommand(msg string, target CommandIO) Command {
-	var count int
-	token := string(msg[:1])
-	paramstr := msg[1:]
-
+func getCount(token byte) (count int) {
 	// Get the number of params in the paramstr based on the token type.
 	// Cmmmand.Params uses this to quickly get a slice of params, so the
 	// multiplexer and the IPC connection don't have to parse the paramstr
@@ -77,6 +75,13 @@ func NewCommand(msg string, target CommandIO) Command {
 		count = 4
 	}
 
+	return
+}
+
+func NewCommand(msg string, target CommandIO) Command {
+	token := msg[0]
+	paramstr := msg[1:]
+	count := getCount(token)
 	return Command{
 		token:    token,
 		paramstr: paramstr,
@@ -84,7 +89,16 @@ func NewCommand(msg string, target CommandIO) Command {
 		target:   target}
 }
 
-func (c Command) Token() string {
+func BuildCommand(token byte, paramstr string, target CommandIO) Command {
+	count := getCount(token)
+	return Command{
+		token:    token,
+		paramstr: paramstr,
+		count:    count,
+		target:   target}
+}
+
+func (c Command) Token() byte {
 	return c.token
 }
 
@@ -93,7 +107,7 @@ func (c Command) Params() []string {
 }
 
 func (c Command) Message() string {
-	return c.token + c.paramstr
+	return string(c.token) + c.paramstr
 }
 
 // The command target here is ALWAYS the multiplexer. This is the final step in

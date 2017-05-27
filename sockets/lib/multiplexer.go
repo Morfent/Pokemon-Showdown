@@ -24,12 +24,14 @@ import (
 )
 
 // Subchannel IDs
-const DEFAULT_SUBCHANNEL_ID string = "0"
-const P1_SUBCHANNEL_ID string = "1"
-const P2_SUBCHANNEL_ID string = "2"
+const (
+	DEFAULT_SUBCHANNEL_ID byte = '0'
+	P1_SUBCHANNEL_ID      byte = '1'
+	P2_SUBCHANNEL_ID      byte = '2'
+)
 
 // Map of socket IDs to subchannel IDs.
-type Channel map[string]string
+type Channel map[string]byte
 
 type Multiplexer struct {
 	// Next socket ID counter.
@@ -94,7 +96,7 @@ func (m *Multiplexer) Process(cmd Command) (err error) {
 		err = m.channelBroadcast(cid, msg)
 	case SUBCHANNEL_MOVE:
 		cid := params[0]
-		scid := params[1]
+		scid := params[1][0]
 		sid := params[2]
 		err = m.subchannelMove(cid, scid, sid)
 	case SUBCHANNEL_BROADCAST:
@@ -126,7 +128,7 @@ func (m *Multiplexer) socketAdd(s sockjs.Session) (sid string) {
 		ips := req.Header.Get("X-Forwarded-For")
 		protocol := path.Base(req.URL.Path)
 
-		cmd := NewCommand(SOCKET_CONNECT+sid+"\n"+ip+"\n"+ips+"\n"+protocol, m.conn)
+		cmd := BuildCommand(SOCKET_CONNECT, sid+"\n"+ip+"\n"+ips+"\n"+protocol, m.conn)
 		CmdQueue <- cmd
 	}
 
@@ -161,7 +163,7 @@ func (m *Multiplexer) socketRemove(sid string, forced bool) error {
 	} else {
 		// User disconnected on their own. Poke the parent process to clean up.
 		if m.conn.Listening() {
-			cmd := NewCommand(SOCKET_DISCONNECT+sid, m.conn)
+			cmd := BuildCommand(SOCKET_DISCONNECT, sid, m.conn)
 			CmdQueue <- cmd
 		}
 	}
@@ -175,7 +177,7 @@ func (m *Multiplexer) socketReceive(sid string, msg string) error {
 
 	if _, ok := m.sockets[sid]; ok {
 		if m.conn.Listening() {
-			cmd := NewCommand(SOCKET_RECEIVE+sid+"\n"+msg, m.conn)
+			cmd := BuildCommand(SOCKET_RECEIVE, sid+"\n"+msg, m.conn)
 			CmdQueue <- cmd
 		}
 		return nil
@@ -262,7 +264,7 @@ func (m *Multiplexer) channelBroadcast(cid string, msg string) error {
 	return nil
 }
 
-func (m *Multiplexer) subchannelMove(cid string, scid string, sid string) error {
+func (m *Multiplexer) subchannelMove(cid string, scid byte, sid string) error {
 	m.cmux.Lock()
 	defer m.cmux.Unlock()
 

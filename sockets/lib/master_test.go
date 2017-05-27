@@ -47,7 +47,7 @@ func TestMasterListen(t *testing.T) {
 				mux.nsid++
 				mux.smux.Unlock()
 
-				cmd := NewCommand(SOCKET_DISCONNECT+sid, mux)
+				cmd := BuildCommand(SOCKET_DISCONNECT, sid, mux)
 				cmd.Process()
 				if len(CmdQueue) != 0 {
 					t.Error("Sockets: master failed to pass command struct from worker to multiplexer")
@@ -60,7 +60,7 @@ func TestMasterListen(t *testing.T) {
 				sid := string(mux.nsid)
 				mux.smux.Unlock()
 
-				cmd := NewCommand(SOCKET_CONNECT+sid+"\n0.0.0.0\n\nwebsocket", conn)
+				cmd := BuildCommand(SOCKET_CONNECT, sid+"\n0.0.0.0\n\nwebsocket", conn)
 				cmd.Process()
 				if len(CmdQueue) != 0 {
 					t.Error("Sockets: master failed to pass command struct from worker to connection")

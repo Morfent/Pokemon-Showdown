@@ -45,7 +45,7 @@ func TestConnection(t *testing.T) {
 	conn.Listen(mux)
 	mux.Listen(conn)
 
-	cmd := NewCommand(SOCKET_SEND+"0\n|ayy lmao", mux)
+	cmd := BuildCommand(SOCKET_SEND, "0\n|ayy lmao", mux)
 	err = conn.Process(cmd)
 	if err != nil {
 		t.Errorf("%v", err)
