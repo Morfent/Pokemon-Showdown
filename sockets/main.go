@@ -40,12 +40,9 @@ func main() {
 	// FIXME: this doesn't route correctly on Windows. Fix it!!
 	r := mux.NewRouter()
 
-	avatarDir, _ := filepath.Abs("./config/avatars")
-	r.PathPrefix("/avatars/").
-		Handler(http.FileServer(http.Dir(avatarDir)))
-
-	customCSSDir, _ := filepath.Abs("./config")
-	r.Handle("/custom.css", http.FileServer(http.Dir(customCSSDir)))
+	staticDir, _ := filepath.Abs("./static")
+	r.PathPrefix("/static/").
+		Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
 
 	// Set up the SockJS server.
 	opts := sockjs.Options{
@@ -58,9 +55,12 @@ func main() {
 	r.PathPrefix("/showdown").
 		Handler(sockjs.NewHandler("/showdown", opts, smux.Handler))
 
-	staticDir, _ := filepath.Abs("./static")
-	r.PathPrefix("/static/").
-		Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
+	customCSSDir, _ := filepath.Abs("./config")
+	r.Handle("/custom.css", http.FileServer(http.Dir(customCSSDir)))
+
+	avatarDir, _ := filepath.Abs("./config/avatars")
+	r.PathPrefix("/avatars/").
+		Handler(http.FileServer(http.Dir(avatarDir)))
 
 	r.NotFoundHandler =
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
