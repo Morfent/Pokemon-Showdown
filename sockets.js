@@ -32,12 +32,12 @@ require('net').Socket; // eslint-disable-line no-unused-expressions
 /** @typedef {NodeJSWorker | GoWorker} Worker */
 
 /**
- * @description IPC delimiter byte. This byte must stringify as either a
- * hexadecimal or a Unicode escape code when stringified as JSON to prevent
- * messages from being able to contain the byte itself.
+ * @description IPC delimiter byte. This byte must stringify as a hexadeimal
+ * escape code when stringified as JSON to prevent messages from being able to
+ * contain the byte itself.
  * @type {string}
  */
-const DELIM = '\u0003';
+const DELIM = '\x03';
 
 /**
  * @class WorkerWrapper

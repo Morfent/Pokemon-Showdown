@@ -19,10 +19,10 @@ import (
 	"os"
 )
 
-// This must be a byte that stringifies to either a hexadecimal or Unicode
-// escape code. Otherwise, it would be possible for someone to send a message
-// with the delimiter and break up messages.
-const DELIM byte = '\u0003'
+// This must be a byte that stringifies to either a hexadecimal escape code.
+// Otherwise, it would be possible for someone to send a message with the
+// delimiter and break up messages.
+const DELIM byte = '\x03'
 
 type Connection struct {
 	// Port the parent's TCP server is hosting over.
