@@ -79,26 +79,32 @@ if (config && config.golang) {
 		}
 	}
 
+	let srcPath = path.resolve(__dirname, 'sockets');
+	let tarPath = path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown/sockets');
 	if (needsSrcDir) {
 		try {
 			fs.mkdirSync(path.resolve(GOPATH, 'src/github.com/Zarel'));
+			fs.mkdirSync(path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown'));
 		} catch (e) {
-			console.error(`Cannot make go source directory for the sockets library files! Symlink them manually from ${__dirname} to ${path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown/')}`);
+			console.log(e);
+			console.error(`Cannot make go source directory for the sockets library files! Symlink them manually from ${srcPath} to ${tarPath}`);
 			process.exit(0);
 		}
 	}
 
 	try {
-		stat = fs.lstatSync(path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown'));
+		stat = fs.lstatSync(path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown/sockets'));
 	} catch (e) {}
 
 	if (!stat || !stat.isSymbolicLink()) {
 		try {
-			// FIXME: does this even work on Windows? Check to see if `mklink /J`
-			// might be needed instead
-			fs.symlink(__dirname, path.resolve(GOPATH, 'src/github.com/Zarel/Pokemon-Showdown'));
+			if (process.platform === 'win32') {
+				child_process.execSync(`mklink /J ${tarPath} ${srcPath}`, {stdio: 'inherit'});
+			} else {
+				child_process.execSync(`ln -sF ${srcPath} ${tarPath}`, {stdio: 'inherit'});
+			}
 		} catch (e) {
-			console.error(`Cannot make go source directory for the sockets library files! Symlink them manually from ${__dirname} to ${path.resolve(GOPATH, './src/github.com/Zarel/Pokemon-Showdown/')}`);
+			console.error(`Cannot make go source directory for the sockets library files! Symlink them manually from ${srcPath} to ${tarPath}`);
 			process.exit(0);
 		}
 	}

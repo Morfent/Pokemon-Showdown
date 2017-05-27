@@ -30,18 +30,19 @@ const SOCKET_SEND = '>';
 const CHANNEL_ADD = '+';
 const CHANNEL_REMOVE = '-';
 const CHANNEL_BROADCAST = '#';
-const SUBCHANNEL_ID_MOVE = '.';
-const SUBCHANNEL_ID_BROADCAST = ':';
+const SUBCHANNEL_MOVE = '.';
+const SUBCHANNEL_BROADCAST = ':';
 
 // Subchannel IDs
-const DEFAULT_SUBCHANNEL_ID = '0';
-const P1_SUBCHANNEL_ID = '1';
-const P2_SUBCHANNEL_ID = '2';
+const DEFAULT_SUBCHANNEL = '0';
+const P1_SUBCHANNEL = '1';
+const P2_SUBCHANNEL = '2';
 
 // Regex for splitting subchannel broadcasts between subchannels.
-const SUBCHANNEL_ID_MESSAGE_REGEX = /\n\/split(\n[^\n]*)(\n[^\n]*)(\n[^\n]*)\n[^\n]*/g;
+const SUBCHANNEL_MESSAGE_REGEX = /\n\/split(\n[^\n]*)(\n[^\n]*)(\n[^\n]*)\n[^\n]*/g;
 
 /*
+ * FIXME: this also belongs in dev-tools/globals.ts...
  * @typedef {Map<string, string>} Channel
  * @typedef {Map<string, Socket>} Sockets
  * @typedef {Map<string, Channel>} Channels
@@ -105,7 +106,6 @@ class Multiplexer {
 	 */
 	sendUpstream(token, ...params) {
 		let message = `${token}${params.join('\n')}`;
-		// @ts-ignore
 		process.send(message);
 	}
 
@@ -173,10 +173,10 @@ class Multiplexer {
 		case CHANNEL_BROADCAST:
 			[channelid, message] = this.parseParams(params, 2);
 			return this.onChannelBroadcast(channelid, message);
-		case SUBCHANNEL_ID_MOVE:
+		case SUBCHANNEL_MOVE:
 			[channelid, subchannelid, socketid] = this.parseParams(params, 3);
 			return this.onSubchannelMove(channelid, subchannelid, socketid);
-		case SUBCHANNEL_ID_BROADCAST:
+		case SUBCHANNEL_BROADCAST:
 			[channelid, message] = this.parseParams(params, 2);
 			return this.onSubchannelBroadcast(channelid, message);
 		default:
@@ -312,10 +312,10 @@ class Multiplexer {
 		if (this.channels.has(channelid)) {
 			let channel = this.channels.get(channelid);
 			if (channel.has(socketid)) return false;
-			channel.set(socketid, DEFAULT_SUBCHANNEL_ID);
+			channel.set(socketid, DEFAULT_SUBCHANNEL);
 		} else {
 			let channel = new Map();
-			channel.set(socketid, DEFAULT_SUBCHANNEL_ID);
+			channel.set(socketid, DEFAULT_SUBCHANNEL);
 			this.channels.set(channelid, channel);
 		}
 
@@ -393,7 +393,7 @@ class Multiplexer {
 		if (!channel) return false;
 
 		/** @type {RegExpExecArray | null} */
-		let matches = SUBCHANNEL_ID_MESSAGE_REGEX.exec(message);
+		let matches = SUBCHANNEL_MESSAGE_REGEX.exec(message);
 		if (!matches) return false;
 
 		let [match, msg1, msg2, msg3] = matches.splice(0);
@@ -405,13 +405,13 @@ class Multiplexer {
 				if (!socket) return;
 
 				switch (subchannelid) {
-				case DEFAULT_SUBCHANNEL_ID:
+				case DEFAULT_SUBCHANNEL:
 					socket.write(msg1);
 					break;
-				case P1_SUBCHANNEL_ID:
+				case P1_SUBCHANNEL:
 					socket.write(msg2);
 					break;
-				case P2_SUBCHANNEL_ID:
+				case P2_SUBCHANNEL:
 					socket.write(msg3);
 					break;
 				default:
@@ -424,8 +424,6 @@ class Multiplexer {
 		return true;
 	}
 }
-
-exports.Multiplexer = Multiplexer;
 
 if (cluster.isWorker) {
 	if (process.env.PSPORT) Config.port = +process.env.PSPORT;
@@ -553,3 +551,26 @@ if (cluster.isWorker) {
 
 	require('./repl').start('sockets-', `${cluster.worker.id}-${process.pid}`, /** @param {string} cmd */ cmd => eval(cmd));
 }
+
+module.exports = {
+	TOKENS: {
+		EVAL,
+		SOCKET_CONNECT,
+		SOCKET_DISCONNECT,
+		SOCKET_SEND,
+		SOCKET_RECEIVE,
+		CHANNEL_ADD,
+		CHANNEL_REMOVE,
+		CHANNEL_BROADCAST,
+		SUBCHANNEL_MOVE,
+		SUBCHANNEL_BROADCAST,
+	},
+
+	SUBCHANNEL_IDS: {
+		DEFAULT_SUBCHANNEL,
+		P1_SUBCHANNEL,
+		P2_SUBCHANNEL,
+	},
+
+	Multiplexer,
+};
