@@ -1,5 +1,21 @@
+/**
+ * Master - Master/Worker pattern implementation
+ * https://pokemonshowdown.com/
+ *
+ * This makes it possible to parse messages from sockets and the parent process
+ * concurrently. A command queue stores commands created by the multiplexer and
+ * IPC connection. The master contains a pool of command channels belonging to
+ * workers. Once a command is available in the queue, the master takes a
+ * worker's command channel from its pool and enqueues it. The worker takes the
+ * command and processes it before enqueueing its command channel back into the
+ * master's pool. The workers are distributed round-robin, much like Node's
+ * cluster module (when not using Windows).
+ */
+
 package sockets
 
+// A global command channel for the multiplexer and IPC connection to enqueue
+// their new commands to be processed by the workers.
 var CmdQueue = make(chan Command)
 
 type master struct {
@@ -14,6 +30,7 @@ func NewMaster(count int) *master {
 		count: count}
 }
 
+// Create the initial set of workers and make them listen before the master.
 func (m *master) Spawn() {
 	for i := 0; i < m.count; i++ {
 		w := newWorker(m.wpool)
@@ -21,6 +38,8 @@ func (m *master) Spawn() {
 	}
 }
 
+// Listen for new commands to remove from the command queue and pass to the
+// first available worker.
 func (m *master) Listen() {
 	for {
 		cmd := <-CmdQueue
@@ -30,9 +49,13 @@ func (m *master) Listen() {
 }
 
 type worker struct {
+	// This is the same pool the master has...
 	wpool chan chan Command
+	// ...which is used to allow the worker to enqueue its own command channel
+	// into the pool.
 	cmdch chan Command
-	quit  chan bool
+	// In case the worker needs to commit suicide. Currently unused.
+	quit chan bool
 }
 
 func newWorker(wpool chan chan Command) *worker {
@@ -50,6 +73,8 @@ func (w *worker) listen() {
 			w.wpool <- w.cmdch
 			select {
 			case cmd := <-w.cmdch:
+				// Invokes *Multiplexer.Process or *Connection.Process, where
+				// the command is finally handled and used to update state.
 				cmd.target.Process(cmd)
 			case <-w.quit:
 				return

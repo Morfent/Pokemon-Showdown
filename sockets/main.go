@@ -14,10 +14,6 @@ import (
 	"github.com/igm/sockjs-go/sockjs"
 )
 
-func notFoundHandler(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/static/404.html", http.StatusSeeOther)
-}
-
 func main() {
 	// Parse our config settings passed through the $PS_CONFIG environment
 	// variable by the parent process.
@@ -65,7 +61,10 @@ func main() {
 	r.PathPrefix("/static/").
 		Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
 
-	r.NotFoundHandler = http.HandlerFunc(notFoundHandler)
+	r.NotFoundHandler =
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/static/404.html", http.StatusSeeOther)
+		})
 
 	// Begin serving over HTTPS if configured to do so.
 	if config.SSL.Options.Cert != "" && config.SSL.Options.Key != "" {
