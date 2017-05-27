@@ -1,3 +1,15 @@
+/**
+ * Multiplexer - Socket/Channel/Subchannel state machine
+ * https://pokemonshowdown.com/
+ *
+ * This keeps track of the sockets that connect to the SockJS server. Sockets
+ * are stored in the multiplexer to allow the parent process to manipulate them
+ * as it pleases. Channels represent rooms in the parent process; subchannels
+ * split battle rooms into three groups: side 1, side 2, and spectators.
+ * Certain messages will display differently depending on which subchannel the
+ * user's socket is in.
+ */
+
 package sockets
 
 import (
@@ -11,23 +23,35 @@ import (
 	"github.com/igm/sockjs-go/sockjs"
 )
 
+// Subchannel IDs
 const DEFAULT_SUBCHANNEL_ID string = "0"
 const P1_SUBCHANNEL_ID string = "1"
 const P2_SUBCHANNEL_ID string = "2"
 
+// Map of socket IDs to subchannel IDs.
+type Channel map[string]string
+
 type Multiplexer struct {
-	nsid     uint64
-	sockets  map[string]sockjs.Session
-	smux     sync.Mutex
-	channels map[string]map[string]string
-	cmux     sync.Mutex
-	scre     *regexp.Regexp
-	conn     *Connection
+	// Next socket ID counter.
+	nsid uint64
+	// Map of socket IDs to sockets.
+	sockets map[string]sockjs.Session
+	// Mutex for access to sockets and nsid.
+	smux sync.Mutex
+	// Map of channel (room) IDs to channels .
+	channels map[string]Channel
+	// Mutex for access to channels.
+	cmux sync.Mutex
+	// Subchannel regex used for splitting messages in
+	// *Multiplexer.SubchannelSend
+	scre *regexp.Regexp
+	// The IPC connection. Can't target it in commands without it here.
+	conn *Connection
 }
 
 func NewMultiplexer() *Multiplexer {
 	sockets := make(map[string]sockjs.Session)
-	channels := make(map[string]map[string]string)
+	channels := make(map[string]Channel)
 	scre := regexp.MustCompile(`\n/split(\n[^\n]*)(\n[^\n]*)(\n[^\n]*)\n[^\n]*`)
 	return &Multiplexer{
 		sockets:  sockets,
@@ -43,6 +67,7 @@ func (m *Multiplexer) Process(cmd Command) (err error) {
 	// fmt.Printf("IPC => Sockets: %v\n", cmd.Message())
 	params := cmd.Params()
 
+	// Parse the command's params and call the appropriate method.
 	switch token := cmd.Token(); token {
 	case SOCKET_DISCONNECT:
 		sid := params[0]
@@ -127,6 +152,7 @@ func (m *Multiplexer) socketRemove(sid string, forced bool) error {
 	if ok {
 		delete((*m).sockets, sid)
 	} else {
+		m.smux.Unlock()
 		return fmt.Errorf("Sockets: attempted to remove socket of ID %v that doesn't exist", sid)
 	}
 
@@ -178,7 +204,7 @@ func (m *Multiplexer) channelAdd(cid string, sid string) error {
 
 	c, ok := m.channels[cid]
 	if !ok {
-		c = make(map[string]string)
+		c = make(Channel)
 		m.channels[cid] = c
 	}
 
@@ -289,6 +315,8 @@ func (m *Multiplexer) subchannelBroadcast(cid string, msg string) error {
 	return nil
 }
 
+// This is the HTTP handler for the SockJS server. This is where new sockets
+// arrive for us to use.
 func (m *Multiplexer) Handler(s sockjs.Session) {
 	sid := m.socketAdd(s)
 	for {

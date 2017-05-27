@@ -1,3 +1,14 @@
+/**
+ * IPC - Inter-Process Communication
+ * https://pokemonshowdown.com/
+ *
+ * This handles all communication between us and the parent process. The parent
+ * process creates a local TCP server using a random port. The port is passed
+ * down to us through the $PS_IPC_PORT environment variable. A TCP connection
+ * to the parent's server is created, allowing us to send messages back and
+ * forth.
+ */
+
 package sockets
 
 import (
@@ -8,13 +19,25 @@ import (
 	"os"
 )
 
+// This must be a byte that stringifies to either a hexadecimal or Unicode
+// escape code. Otherwise, it would be possible for someone to send a message
+// with the delimiter and break up messages.
 const DELIM byte = '\u0003'
 
 type Connection struct {
-	port      string
-	addr      *net.TCPAddr
-	conn      *net.TCPConn
-	mux       *Multiplexer
+	// Port the parent's TCP server is hosting over.
+	port string
+	// The TCP address of the server.
+	addr *net.TCPAddr
+	// The connection to the server.
+	conn *net.TCPConn
+	// The multiplexer. Solely here to make it possible to use it as the target
+	// for downstream commands.
+	mux *Multiplexer
+	// Whether or not the connection has the multiplexer and is parsing
+	// incoming messages from the connection. The multiplexer in particular is
+	// dependent on this to know whether or not it's safe to queue new commands.
+	// This is irrelevant in production, but in unit tests it's essential.
 	listening bool
 }
 
@@ -73,6 +96,7 @@ func (c *Connection) Listen(mux *Multiplexer) {
 	return
 }
 
+// Final step in evaluating commands targeted at the IPC connection.
 func (c *Connection) Process(cmd Command) (err error) {
 	// fmt.Printf("Sockets => IPC: %v\n", cmd.Message())
 	if !c.listening {
