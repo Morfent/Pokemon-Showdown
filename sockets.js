@@ -23,6 +23,8 @@ if (cluster.isMaster) {
 	});
 }
 
+// FIXME: this needs to go to dev-tools/globals.ts, but @types/node and
+// @types/sockjs-node must be installed before that can be done.
 /** @typedef {any} NodeJSWorker */
 cluster.Worker; // eslint-disable-line no-unused-expressions
 /** @typedef {any} Socket */
@@ -30,8 +32,9 @@ require('net').Socket; // eslint-disable-line no-unused-expressions
 /** @typedef {NodeJSWorker | GoWorker} Worker */
 
 /**
- * @description IPC delimiter byte. Required to parse messages sent to and from
- * Go workers.
+ * @description IPC delimiter byte. This byte must stringify as either a
+ * hexadecimal or a Unicode escape code when stringified as JSON to prevent
+ * messages from being able to contain the byte itself.
  * @type {string}
  */
 const DELIM = '\u0003';
@@ -40,7 +43,10 @@ const DELIM = '\u0003';
  * @class WorkerWrapper
  * @implements NodeJS.Cluster.Worker
  * @description A wrapper class for native Node.js Worker and GoWorker
- * instances.
+ * instances. This parses upstream messages from both types of workers and
+ * cleans up when workers crash or get killed before respawning them. In other
+ * words this listens for events emitted from both types of workers and handles
+ * them accordingly.
  */
 class WorkerWrapper {
 	/**
@@ -101,6 +107,7 @@ class WorkerWrapper {
 	 */
 	set suicide(val) {
 		this.exitedAfterDisconnect = val;
+		this.worker.exitedAfterDisconnect = val;
 	}
 
 	/**
@@ -183,6 +190,30 @@ class WorkerWrapper {
 	}
 
 	/**
+	 * @description Picks the last known IP for a new connection that's found
+	 * to not be trusted as per the DNSBL.
+	 * @param {string} ip
+	 * @param {string} header
+	 * @returns {string}
+	 */
+	pluckUntrustedIp(ip, header = '') {
+		if (!this.isTrustedProxyIp(ip)) {
+			return ip;
+		}
+
+		let ips = header.split(',');
+		let ret;
+		for (let i = ips.length; i--;) {
+			ret = ips[i].trim();
+			if (ret && !this.isTrustedProxyIp(ret)) {
+				return ret;
+			}
+		}
+
+		return ip;
+	}
+
+	/**
 	 * @description 'message' event handler for the worker. Parses which type
 	 * of command the incoming IPC message uses, then parses its parametres and
 	 * calls the appropriate Users method.
@@ -196,14 +227,7 @@ class WorkerWrapper {
 		switch (command) {
 		case '*':
 			let [socketid, ip, header, protocol] = this.parseParams(params, 4);
-			let ips;
-			if (this.isTrustedProxyIp(ip)) {
-				ips = (header || '').split(',');
-				for (let i = ips.length; i--;) {
-					ip = ips[i].trim() || ip;
-					if (!this.isTrustedProxyIp(ip)) break;
-				}
-			}
+			ip = this.pluckUntrustedIp(ip, header);
 			Users.socketConnect(this.worker, this.id, socketid, ip, protocol);
 			break;
 		case '!':
@@ -245,8 +269,6 @@ class WorkerWrapper {
 		spawnWorker();
 	}
 }
-
-exports.WorkerWrapper = WorkerWrapper;
 
 /**
  * @class GoWorker
@@ -423,14 +445,11 @@ class GoWorker extends EventEmitter {
 	}
 }
 
-exports.GoWorker = GoWorker;
-
 /**
  * @description Map of worker IDs to worker processes.
  * @type {Map<number, Worker>}
  */
-const workers = exports.workers = new Map();
->>>>>>> HEAD~30
+const workers = new Map();
 
 /**
  * @description Worker ID counter used for Go workers.
@@ -460,8 +479,6 @@ function spawnWorker() {
 	return wrapper;
 }
 
-exports.spawnWorker = spawnWorker;
-
 /**
  * @description Initializes the configured number of worker processes.
  * @param {any} port
@@ -469,7 +486,7 @@ exports.spawnWorker = spawnWorker;
  * @param {any} workerCount
  * @returns {void}
  */
-exports.listen = function (port, bindAddress, workerCount) {
+function listen(port, bindAddress, workerCount) {
 	if (port !== undefined && !isNaN(port)) {
 		Config.port = port;
 		Config.ssl = null;
@@ -501,35 +518,35 @@ exports.listen = function (port, bindAddress, workerCount) {
 	for (let i = 0; i < workerCount; i++) {
 		spawnWorker();
 	}
-};
+}
 
 /**
  * @description Kills a worker process using the given worker object.
  * @param {Worker} worker
  * @returns {number}
  */
-exports.killWorker = function (worker) {
+function killWorker(worker) {
 	let count = Users.socketDisconnectAll(worker);
 	try {
 		worker.kill();
 	} catch (e) {}
 	workers.delete(worker.id);
 	return count;
-};
+}
 
 /**
  * @description Kills a worker process using the given worker PID.
  * @param {number} pid
  * @returns {number | false}
  */
-exports.killPid = function (pid) {
+function killPid(pid) {
 	workers.forEach(worker => {
 		if (pid === worker.process.pid) {
 			return this.killWorker(worker);
 		}
 	});
 	return false;
-};
+}
 
 /**
  * @description Sends a message to a socket in a given worker by ID.
@@ -538,9 +555,9 @@ exports.killPid = function (pid) {
  * @param {string} message
  * @returns {void}
  */
-exports.socketSend = function (worker, socketid, message) {
+function socketSend(worker, socketid, message) {
 	worker.send(`>${socketid}\n${message}`);
-};
+}
 
 /**
  * @description Forcefully disconnects a socket in a given worker by ID.
@@ -548,9 +565,9 @@ exports.socketSend = function (worker, socketid, message) {
  * @param {string} socketid
  * @returns {void}
  */
-exports.socketDisconnect = function (worker, socketid) {
+function socketDisconnect(worker, socketid) {
 	worker.send(`!${socketid}`);
-};
+}
 
 /**
  * @description Broadcasts a message to all sockets in a given channel across
@@ -559,11 +576,11 @@ exports.socketDisconnect = function (worker, socketid) {
  * @param {string} message
  * @returns {void}
  */
-exports.channelBroadcast = function (channelid, message) {
+function channelBroadcast(channelid, message) {
 	workers.forEach(worker => {
 		worker.send(`#${channelid}\n${message}`);
 	});
-};
+}
 
 /**
  * @description Broadcasts a message to all sockets in a given channel and a
@@ -573,9 +590,9 @@ exports.channelBroadcast = function (channelid, message) {
  * @param {string} message
  * @returns {void}
  */
-exports.channelSend = function (worker, channelid, message) {
+function channelSend(worker, channelid, message) {
 	worker.send(`#${channelid}\n${message}`);
-};
+}
 
 /**
  * @description Adds a socket to a given channel in a given worker by ID.
@@ -584,9 +601,9 @@ exports.channelSend = function (worker, channelid, message) {
  * @param {string} socketid
  * @returns {void}
  */
-exports.channelAdd = function (worker, channelid, socketid) {
+function channelAdd(worker, channelid, socketid) {
 	worker.send(`+${channelid}\n${socketid}`);
-};
+}
 
 /**
  * @description Removes a socket from a given channel in a given worker by ID.
@@ -595,9 +612,9 @@ exports.channelAdd = function (worker, channelid, socketid) {
  * @param {string} socketid
  * @returns {void}
  */
-exports.channelRemove = function (worker, channelid, socketid) {
+function channelRemove(worker, channelid, socketid) {
 	worker.send(`-${channelid}\n${socketid}`);
-};
+}
 
 /**
  * @description Broadcasts a message to be demuxed into three separate messages
@@ -606,11 +623,11 @@ exports.channelRemove = function (worker, channelid, socketid) {
  * @param {string} message
  * @returns {void}
  */
-exports.subchannelBroadcast = function (channelid, message) {
+function subchannelBroadcast(channelid, message) {
 	workers.forEach(worker => {
 		worker.send(`:${channelid}\n${message}`);
 	});
-};
+}
 
 /**
  * @description Moves a given socket to a different subchannel in a channel by
@@ -620,6 +637,26 @@ exports.subchannelBroadcast = function (channelid, message) {
  * @param {string} subchannelid
  * @param {string} socketid
  */
-exports.subchannelMove = function (worker, channelid, subchannelid, socketid) {
+function subchannelMove(worker, channelid, subchannelid, socketid) {
 	worker.send(`.${channelid}\n${subchannelid}\n${socketid}`);
+}
+
+module.exports = {
+	WorkerWrapper,
+	GoWorker,
+
+	workers,
+	spawnWorker,
+	listen,
+	killWorker,
+	killPid,
+
+	socketSend,
+	socketDisconnect,
+	channelBroadcast,
+	channelSend,
+	channelAdd,
+	channelRemove,
+	subchannelBroadcast,
+	subchannelMove,
 };
