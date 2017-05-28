@@ -86,7 +86,8 @@ func NewCommand(msg string, target CommandIO) Command {
 		token:    token,
 		paramstr: paramstr,
 		count:    count,
-		target:   target}
+		target:   target,
+	}
 }
 
 func BuildCommand(token byte, paramstr string, target CommandIO) Command {
@@ -95,7 +96,8 @@ func BuildCommand(token byte, paramstr string, target CommandIO) Command {
 		token:    token,
 		paramstr: paramstr,
 		count:    count,
-		target:   target}
+		target:   target,
+	}
 }
 
 func (c Command) Token() byte {

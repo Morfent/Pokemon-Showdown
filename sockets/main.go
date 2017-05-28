@@ -49,7 +49,8 @@ func main() {
 		Websocket:       true,
 		HeartbeatDelay:  sockjs.DefaultOptions.HeartbeatDelay,
 		DisconnectDelay: sockjs.DefaultOptions.DisconnectDelay,
-		JSessionID:      sockjs.DefaultOptions.JSessionID}
+		JSessionID:      sockjs.DefaultOptions.JSessionID,
+	}
 
 	r.PathPrefix("/showdown").
 		Handler(sockjs.NewHandler("/showdown", opts, smux.Handler))
@@ -109,7 +110,8 @@ func main() {
 			srv := &http.Server{
 				Handler:   r,
 				Addr:      ba + port,
-				TLSConfig: &tls.Config{Certificates: []tls.Certificate{certs}}}
+				TLSConfig: &tls.Config{Certificates: []tls.Certificate{certs}},
+			}
 
 			// IPv6 is verboten until PS can support it.
 			var ln net.Listener
