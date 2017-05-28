@@ -28,25 +28,16 @@ const (
 )
 
 type Command struct {
-	// The first character of the message. This signifies the command type.
-	token byte
-	// The message with the token removed.
-	paramstr string
-	// The number of parametres in the paramstr. Necessary, since messages
-	// may contain newlines of their own.
-	count int
-	// Either the multiplexer or the IPC connection. Used by workers to finally
-	// process the payload using the target's Process method.
-	target CommandIO
+	token    byte      // Token designating the type of command.
+	paramstr string    // The command parametre list, unparsed.
+	count    int       // The number of parametres in the paramstr.
+	target   CommandIO // The target to process this command.
 }
 
 // The multiplexer and the IPC connection both implement this interface. Its
 // purpose is solely to allow the two structs to be used in Command.
 type CommandIO interface {
-	// Parse the message. Update state with the command's params if need be,
-	// then enqueue another command if a response needs to be sent to the IPC
-	// connection.
-	Process(Command) (err error)
+	Process(Command) (err error) // Invokes one of its methods using the command's token and parametres..
 }
 
 func getCount(token byte) (count int) {

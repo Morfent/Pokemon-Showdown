@@ -25,20 +25,11 @@ import (
 const DELIM byte = '\x03'
 
 type Connection struct {
-	// Port the parent's TCP server is hosting over.
-	port string
-	// The TCP address of the server.
-	addr *net.TCPAddr
-	// The connection to the server.
-	conn *net.TCPConn
-	// The multiplexer. Solely here to make it possible to use it as the target
-	// for downstream commands.
-	mux *Multiplexer
-	// Whether or not the connection has the multiplexer and is parsing
-	// incoming messages from the connection. The multiplexer in particular is
-	// dependent on this to know whether or not it's safe to queue new commands.
-	// This is irrelevant in production, but in unit tests it's essential.
-	listening bool
+	port      string       // Parent process' TCP server's port.
+	addr      *net.TCPAddr // Parent process' TCP server's address.
+	conn      *net.TCPConn // Connection to the parent process' TCP server.
+	mux       *Multiplexer // Target for commands originating from here.
+	listening bool         // Whether or not this is connected and listening for IPC messages.
 }
 
 func NewConnection(envVar string) (c *Connection, err error) {
