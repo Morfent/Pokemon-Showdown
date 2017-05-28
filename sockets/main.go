@@ -37,7 +37,6 @@ func main() {
 	conn.Listen(smux)
 
 	// Set up server routing.
-	// FIXME: this doesn't route correctly on Windows. Fix it!!
 	r := mux.NewRouter()
 
 	staticDir, _ := filepath.Abs("./static")
@@ -67,6 +66,38 @@ func main() {
 			http.Redirect(w, r, "/static/404.html", http.StatusSeeOther)
 		})
 
+	// Begin serving over HTTP.
+	go func(ba string, port string) {
+		srv := &http.Server{
+			Handler: r,
+			Addr:    ba + port}
+
+		// Again, IPv6 is verboten until PS can support it.
+		addr, err := net.ResolveTCPAddr("tcp4", ba+port)
+		if err != nil {
+			log.Fatalf("Sockets: failed to resolve the TCP address of the parent's server: %v", err)
+		}
+
+		ln, err := net.ListenTCP("tcp4", addr)
+		defer ln.Close()
+		if err != nil {
+			log.Fatalf("Sockets: failed to listen on %v over HTTP", srv.Addr)
+		}
+
+		fmt.Printf("Go workers now listening on %v%v\n", ba, port)
+
+		if ba == "0.0.0.0" {
+			fmt.Printf("Test your server at http://localhost%v/\n", port)
+		} else {
+			fmt.Printf("Test your server at http://%v%v/\n", ba, port)
+		}
+
+		// This will block indefinitely until http.Serve returns an error.
+		if err = http.Serve(ln, r); err != nil {
+			log.Fatalf("Sockets: HTTP server failed with error: %v", err)
+		}
+	}(config.BindAddress, config.Port)
+
 	// Begin serving over HTTPS if configured to do so.
 	if config.SSL.Options.Cert != "" && config.SSL.Options.Key != "" {
 		go func(ba string, port string, cert string, key string) {
@@ -88,7 +119,7 @@ func main() {
 				log.Fatalf("Sockets: failed to listen on %v over HTTPS", srv.Addr)
 			}
 
-			fmt.Printf("Sockets: now serving on https://%v%v/\n", ba, port)
+			fmt.Printf("Go workers now listening for SSL on port %v\n", port)
 
 			// This will block indefinitely until http.Serve returns an error.
 			if err := http.Serve(ln, r); err != nil {
@@ -96,32 +127,6 @@ func main() {
 			}
 		}(config.BindAddress, config.SSL.Port, config.SSL.Options.Cert, config.SSL.Options.Key)
 	}
-
-	// Begin serving over HTTP.
-	go func(ba string, port string) {
-		srv := &http.Server{
-			Handler: r,
-			Addr:    ba + port}
-
-		// Again, IPv6 is verboten until PS can support it.
-		addr, err := net.ResolveTCPAddr("tcp4", ba+port)
-		if err != nil {
-			log.Fatalf("Sockets: failed to resolve the TCP address of the parent's server: %v", err)
-		}
-
-		ln, err := net.ListenTCP("tcp4", addr)
-		defer ln.Close()
-		if err != nil {
-			log.Fatalf("Sockets: failed to listen on %v over HTTP", srv.Addr)
-		}
-
-		fmt.Printf("Sockets: now serving on http://%v%v/\n", ba, port)
-
-		// This will block indefinitely until http.Serve returns an error.
-		if err = http.Serve(ln, r); err != nil {
-			log.Fatalf("Sockets: HTTP server failed with error: %v", err)
-		}
-	}(config.BindAddress, config.Port)
 
 	// Finally, spawn workers.to pipe messages received at the multiplexer or
 	// IPC connection to each other concurrently.
