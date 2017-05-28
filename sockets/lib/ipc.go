@@ -60,7 +60,8 @@ func NewConnection(envVar string) (c *Connection, err error) {
 		port:      port,
 		addr:      addr,
 		conn:      conn,
-		listening: false}
+		listening: false,
+	}
 
 	return
 }

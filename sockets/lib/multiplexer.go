@@ -58,7 +58,8 @@ func NewMultiplexer() *Multiplexer {
 	return &Multiplexer{
 		sockets:  sockets,
 		channels: channels,
-		scre:     scre}
+		scre:     scre,
+	}
 }
 
 func (m *Multiplexer) Listen(conn *Connection) {
@@ -250,7 +251,7 @@ func (m *Multiplexer) channelBroadcast(cid string, msg string) error {
 	m.smux.Lock()
 	defer m.smux.Unlock()
 
-	for sid, _ := range c {
+	for sid := range c {
 		var s sockjs.Session
 		if s, ok = m.sockets[sid]; ok {
 			if m.conn.Listening() {

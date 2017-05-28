@@ -10,10 +10,13 @@ func newTestConfig(w int, p string, ba string, s interface{}) (c config) {
 	c = config{
 		Workers:     w,
 		Port:        p,
-		BindAddress: ba}
+		BindAddress: ba,
+	}
+
 	if ssl, ok := s.(sslOpts); ok {
 		c.SSL = ssl
 	}
+
 	return
 }
 

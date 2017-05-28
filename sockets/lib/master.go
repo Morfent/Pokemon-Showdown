@@ -27,7 +27,8 @@ func NewMaster(count int) *master {
 	wpool := make(chan chan Command, count)
 	return &master{
 		wpool: wpool,
-		count: count}
+		count: count,
+	}
 }
 
 // Create the initial set of workers and make them listen before the master.
@@ -64,7 +65,8 @@ func newWorker(wpool chan chan Command) *worker {
 	return &worker{
 		wpool: wpool,
 		cmdch: cmdch,
-		quit:  quit}
+		quit:  quit,
+	}
 }
 
 func (w *worker) listen() {

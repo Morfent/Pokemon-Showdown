@@ -16,7 +16,8 @@ func TestCommands(t *testing.T) {
 		CHANNEL_REMOVE,
 		CHANNEL_BROADCAST,
 		SUBCHANNEL_MOVE,
-		SUBCHANNEL_BROADCAST}
+		SUBCHANNEL_BROADCAST,
+	}
 
 	cmds := make([]Command, len(tokens))
 	for i, token := range tokens {
