@@ -19,8 +19,8 @@ package sockets
 var CmdQueue = make(chan Command)
 
 type master struct {
-	wpool chan chan Command
-	count int
+	wpool chan chan Command // Pool of worker command queues.
+	count int               // Number of workers.
 }
 
 func NewMaster(count int) *master {
@@ -50,13 +50,9 @@ func (m *master) Listen() {
 }
 
 type worker struct {
-	// This is the same pool the master has...
-	wpool chan chan Command
-	// ...which is used to allow the worker to enqueue its own command channel
-	// into the pool.
-	cmdch chan Command
-	// In case the worker needs to commit suicide. Currently unused.
-	quit chan bool
+	wpool chan chan Command // The master's pool of worker command queues.
+	cmdch chan Command      // Queue for incoming commands from CmdQueue.
+	quit  chan bool         // Channel used to kill the worker when needed.
 }
 
 func newWorker(wpool chan chan Command) *worker {

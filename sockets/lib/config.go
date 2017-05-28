@@ -15,28 +15,20 @@ import (
 )
 
 type config struct {
-	// The number of workers for the master to spawn.
-	Workers int `json:"workers"`
-	// The port the HTTP server will host over.
-	Port string `json:"port"`
-	// The hostname the HTTP and HTTPS servers will host with.
-	BindAddress string `json:"bindAddress"`
-	// HTTPS config settings.
-	SSL sslOpts `json:"ssl"`
+	Workers     int     `json:"workers"`     // Number of workers for the master to spawn.
+	Port        string  `json:"port"`        // HTTP server port.
+	BindAddress string  `json:"bindAddress"` // HTTP/HTTPS server(s) hostname.
+	SSL         sslOpts `json:"ssl"`         // HTTPS config settings.
 }
 
 type sslOpts struct {
-	// The port the HTTPS server will host over.
-	Port string `json:"port"`
-	// SSL certificate settings.
-	Options sslKeys `json:"options"`
+	Port    string  `json:"port"`    // HTTPS server port.
+	Options sslKeys `json:"options"` // SSL config settings.
 }
 
 type sslKeys struct {
-	// The path to the SSL certificate file.
-	Cert string `json:"cert"`
-	// The path to the SSL key file.
-	Key string `json:"key"`
+	Cert string `json:"cert"` // Path to the SSL certificate.
+	Key  string `json:"key"`  // Path to the SSL key.
 }
 
 func NewConfig(envVar string) (c config, err error) {

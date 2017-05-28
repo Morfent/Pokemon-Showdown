@@ -34,21 +34,13 @@ const (
 type Channel map[string]byte
 
 type Multiplexer struct {
-	// Next socket ID counter.
-	nsid uint64
-	// Map of socket IDs to sockets.
-	sockets map[string]sockjs.Session
-	// Mutex for access to sockets and nsid.
-	smux sync.Mutex
-	// Map of channel (room) IDs to channels .
-	channels map[string]Channel
-	// Mutex for access to channels.
-	cmux sync.Mutex
-	// Subchannel regex used for splitting messages in
-	// *Multiplexer.SubchannelSend
-	scre *regexp.Regexp
-	// The IPC connection. Can't target it in commands without it here.
-	conn *Connection
+	nsid     uint64                    // Socket ID counter.
+	sockets  map[string]sockjs.Session // Map of socket IDs to sockets.
+	smux     sync.Mutex                // nsid and sockets mutex.
+	channels map[string]Channel        // Map of channel (i.e. room) IDs to channels.
+	cmux     sync.Mutex                // channels mutex.
+	scre     *regexp.Regexp            // Regex for splitting subchannel broadcasts into their three messages.
+	conn     *Connection               // Target for commands originating from here.
 }
 
 func NewMultiplexer() *Multiplexer {
