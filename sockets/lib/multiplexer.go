@@ -46,7 +46,7 @@ type Multiplexer struct {
 func NewMultiplexer() *Multiplexer {
 	sockets := make(map[string]sockjs.Session)
 	channels := make(map[string]Channel)
-	scre := regexp.MustCompile(`\n/split(\n[^\n]*)(\n[^\n]*)(\n[^\n]*)\n[^\n]*`)
+	scre := regexp.MustCompile(`\|split\n([^\n]*)\n([^\n]*)\n([^\n]*)\n[^\n]*`)
 	return &Multiplexer{
 		sockets:  sockets,
 		channels: channels,
@@ -283,27 +283,26 @@ func (m *Multiplexer) subchannelBroadcast(cid string, msg string) error {
 	m.smux.Lock()
 	defer m.smux.Unlock()
 
-	match := m.scre.FindAllStringSubmatch(msg, len(msg))
+	msgs := make(map[byte]string)
 	for sid, scid := range c {
 		s, ok := m.sockets[sid]
 		if !ok {
 			return fmt.Errorf("Sockets: attempted to broadcast to subchannels in channel %v, but socket of ID %v doesn't exist: %v", cid, sid, msg)
 		}
 
-		var msg string
-		for _, msgs := range match {
+		if _, ok := msgs[scid]; !ok {
 			switch scid {
 			case DEFAULT_SUBCHANNEL_ID:
-				msg = msgs[1]
+				msgs[scid] = m.scre.ReplaceAllString(msg, "$1")
 			case P1_SUBCHANNEL_ID:
-				msg = msgs[2]
+				msgs[scid] = m.scre.ReplaceAllString(msg, "$2")
 			case P2_SUBCHANNEL_ID:
-				msg = msgs[3]
+				msgs[scid] = m.scre.ReplaceAllString(msg, "$3")
 			}
 		}
 
 		if m.conn.Listening() {
-			s.Send(msg)
+			s.Send(msgs[scid])
 		}
 	}
 

@@ -2,28 +2,28 @@
 
 const assert = require('assert');
 
-const {createSocket} = require('../../dev-tools/sockets');
+let sockets;
 
 describe('Sockets workers', function () {
 	before(function () {
-		this.mux = new (require('../../sockets-workers')).Multiplexer();
+		sockets = require('../../sockets-workers');
+
+		this.mux = new sockets.Multiplexer();
 		clearInterval(this.mux.cleanupInterval);
 		this.mux.cleanupInterval = null;
-		this.mux.sendUpstream = () => {};
-	});
 
-	beforeEach(function () {
-		this.socket = createSocket();
+		this.socket = require('../../dev-tools/sockets').createSocket();
 	});
 
 	afterEach(function () {
-		this.mux.tryDestroySocket(this.socket);
+		this.mux.socketCounter = 0;
+		this.mux.sockets.clear();
 		this.mux.channels.clear();
 	});
 
 	after(function () {
+		this.mux.tryDestroySocket(this.socket);
 		this.socket = null;
-		this.mux.sockets.clear();
 		this.mux = null;
 	});
 
@@ -75,5 +75,22 @@ describe('Sockets workers', function () {
 		this.mux.onChannelAdd('global', '0');
 		let res = this.mux.onSubchannelMove('global', '1', '0');
 		assert.ok(res);
+	});
+
+	it('should broadcast to subchannels', function () {
+		let messages = '|split\n0\n1\n2\n|\n|split\n3\n4\n5\n|';
+		for (let i = 0; i < 3; i++) {
+			let message = messages.replace(sockets.SUBCHANNEL_MESSAGE_REGEX, `$${i + 1}`);
+			assert.strictEqual(message, `${i}\n${i + 3}`);
+		}
+
+		this.mux.onSocketConnect(this.socket);
+		this.mux.onChannelAdd('global', '0');
+		this.mux.onSubchannelMove('global', '1', '0');
+		let res = this.mux.onSubchannelBroadcast('global', messages);
+		assert.ok(res);
+		this.mux.onChannelRemove('global', '0');
+		res = this.mux.onSubchannelBroadcast('global', messages);
+		assert.ok(!res);
 	});
 });

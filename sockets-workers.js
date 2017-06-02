@@ -14,12 +14,6 @@
 
 const cluster = require('cluster');
 const fs = require('fs');
-const sockjs = require('sockjs');
-const StaticServer = require('node-static').Server;
-
-if (!global.Config) global.Config = require('./config/config');
-if (!global.Dnsbl) global.Dnsbl = require('./dnsbl');
-if (!global.Monitor) global.Monitor = require('./monitor');
 
 // IPC command tokens
 const EVAL = '$';
@@ -34,19 +28,12 @@ const SUBCHANNEL_MOVE = '.';
 const SUBCHANNEL_BROADCAST = ':';
 
 // Subchannel IDs
-const DEFAULT_SUBCHANNEL = '0';
-const P1_SUBCHANNEL = '1';
-const P2_SUBCHANNEL = '2';
+const DEFAULT_SUBCHANNEL_ID = '0';
+const P1_SUBCHANNEL_ID = '1';
+const P2_SUBCHANNEL_ID = '2';
 
 // Regex for splitting subchannel broadcasts between subchannels.
-const SUBCHANNEL_MESSAGE_REGEX = /\n\/split(\n[^\n]*)(\n[^\n]*)(\n[^\n]*)\n[^\n]*/g;
-
-/*
- * FIXME: this also belongs in dev-tools/globals.ts...
- * @typedef {Map<string, string>} Channel
- * @typedef {Map<string, Socket>} Sockets
- * @typedef {Map<string, Channel>} Channels
- */
+const SUBCHANNEL_MESSAGE_REGEX = /\|split\n([^\n]*)\n([^\n]*)\n([^\n]*)\n[^\n]*/g;
 
 /**
  * @class Multiplexer
@@ -55,15 +42,12 @@ const SUBCHANNEL_MESSAGE_REGEX = /\n\/split(\n[^\n]*)(\n[^\n]*)(\n[^\n]*)\n[^\n]
  * messages.
  */
 class Multiplexer {
-	/**
-	 * @param {number} socketCounter
-	 * @param {Sockets} sockets
-	 * @param {Channels} channels
-	 * @param {NodeJS.Timer | null} cleanupInterval
-	 */
 	constructor() {
+		/** @type {number} */
 		this.socketCounter = 0;
+		/** @type {Map<string, any>} */
 		this.sockets = new Map();
+		/** @type {Map<string, Map<string, string>>} */
 		this.channels = new Map();
 		this.cleanupInterval = setInterval(() => this.sweepClosedSockets(), 10 * 60 * 1000);
 	}
@@ -71,7 +55,6 @@ class Multiplexer {
 	/**
 	 * @description Mitigates a potential bug in SockJS or Faye-Websocket where
 	 * sockets fail to emit a 'close' event after having disconnected.
-	 * @returns {void}
 	 */
 	sweepClosedSockets() {
 		this.sockets.forEach(socket => {
@@ -102,11 +85,10 @@ class Multiplexer {
 	 * @description Sends an IPC message to the parent process.
 	 * @param {string} token
 	 * @param {string[]} params
-	 * @returns {void}
 	 */
 	sendUpstream(token, ...params) {
 		let message = `${token}${params.join('\n')}`;
-		process.send(message);
+		if (process.send) process.send(message);
 	}
 
 	/**
@@ -114,7 +96,7 @@ class Multiplexer {
 	 * command.
 	 * @param {string} params
 	 * @param {number} count
-	 * @returns {string[]}
+	 * @return {string[]}
 	 */
 	parseParams(params, count) {
 		let i = 0;
@@ -147,7 +129,7 @@ class Multiplexer {
 	/**
 	 * @description Parses downstream messages.
 	 * @param {string} data
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	receiveDownstream(data) {
 		let command = data.charAt(0);
@@ -179,16 +161,12 @@ class Multiplexer {
 		case SUBCHANNEL_BROADCAST:
 			[channelid, message] = this.parseParams(params, 2);
 			return this.onSubchannelBroadcast(channelid, message);
-		default:
-			Monitor.debug(`Sockets worker IPC error: unknown command type in downstream message: ${data}`);
-			return false;
 		}
 	}
 
 	/**
 	 * @description Safely tries to destroy a socket's connection.
 	 * @param {any} socket
-	 * @returns {void}
 	 */
 	tryDestroySocket(socket) {
 		try {
@@ -200,7 +178,7 @@ class Multiplexer {
 	/**
 	 * @description Eval handler for downstream messages.
 	 * @param {string} expr
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onEval(expr) {
 		try {
@@ -213,7 +191,7 @@ class Multiplexer {
 	/**
 	 * @description Sockets.socketConnect message handler.
 	 * @param {any} socket
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onSocketConnect(socket) {
 		if (!socket) return false;
@@ -228,15 +206,18 @@ class Multiplexer {
 		this.sockets.set(socketid, socket);
 		this.sendUpstream(SOCKET_CONNECT, socketid, ip, ips, socket.protocol);
 
-		socket.on('data', /** @param {string} message */ message => {
-			this.onSocketReceive(socketid, message);
-		});
+		socket.on('data',
+			/** @param {string} message */
+			message => {
+				this.onSocketReceive(socketid, message);
+			}
+		);
 
 		socket.on('close', () => {
 			this.sendUpstream(SOCKET_DISCONNECT, socketid);
 			this.sockets.delete(socketid);
 			this.channels.forEach((channel, channelid) => {
-				if (!channel.has(socketid)) return;
+				if (!channel || !channel.has(socketid)) return;
 				channel.delete(socketid);
 				if (!channel.size) this.channels.delete(channelid);
 			});
@@ -248,7 +229,7 @@ class Multiplexer {
 	/**
 	 * @description Sockets.socketDisconnect message handler.
 	 * @param {string} socketid
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onSocketDisconnect(socketid) {
 		let socket = this.sockets.get(socketid);
@@ -262,7 +243,7 @@ class Multiplexer {
 	 * @description Sockets.socketSend message handler.
 	 * @param {string} socketid
 	 * @param {string} message
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onSocketSend(socketid, message) {
 		let socket = this.sockets.get(socketid);
@@ -277,7 +258,7 @@ class Multiplexer {
 	 * upstream.
 	 * @param {string} socketid
 	 * @param {string} message
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onSocketReceive(socketid, message) {
 		// Drop empty messages (DDOS?).
@@ -304,18 +285,17 @@ class Multiplexer {
 	 * @description Sockets.channelAdd message handler.
 	 * @param {string} channelid
 	 * @param {string} socketid
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onChannelAdd(channelid, socketid) {
 		if (!this.sockets.has(socketid)) return false;
 
 		if (this.channels.has(channelid)) {
 			let channel = this.channels.get(channelid);
-			if (channel.has(socketid)) return false;
-			channel.set(socketid, DEFAULT_SUBCHANNEL);
+			if (!channel || channel.has(socketid)) return false;
+			channel.set(socketid, DEFAULT_SUBCHANNEL_ID);
 		} else {
-			let channel = new Map();
-			channel.set(socketid, DEFAULT_SUBCHANNEL);
+			let channel = new Map([[socketid, DEFAULT_SUBCHANNEL_ID]]);
 			this.channels.set(channelid, channel);
 		}
 
@@ -326,15 +306,14 @@ class Multiplexer {
 	 * @description Sockets.channelRemove message handler.
 	 * @param {string} channelid
 	 * @param {string} socketid
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onChannelRemove(channelid, socketid) {
 		let channel = this.channels.get(channelid);
-		if (!channel) return false;
+		if (!channel || !channel.has(socketid)) return false;
 
 		channel.delete(socketid);
 		if (!channel.size) this.channels.delete(channelid);
-
 		return true;
 	}
 
@@ -343,7 +322,7 @@ class Multiplexer {
 	 * handler.
 	 * @param {string} channelid
 	 * @param {string} message
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onChannelBroadcast(channelid, message) {
 		let channel = this.channels.get(channelid);
@@ -366,17 +345,17 @@ class Multiplexer {
 	 * @param {string} channelid
 	 * @param {string} subchannelid
 	 * @param {string} socketid
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onSubchannelMove(channelid, subchannelid, socketid) {
 		if (!this.sockets.has(socketid)) return false;
 
 		if (this.channels.has(channelid)) {
+			let channel = this.channels.get(channelid);
+			if (channel) channel.set(socketid, subchannelid);
+		} else {
 			let channel = new Map([[socketid, subchannelid]]);
 			this.channels.set(channelid, channel);
-		} else {
-			let channel = this.channels.get(channelid);
-			channel.set(socketid, subchannelid);
 		}
 
 		return true;
@@ -386,17 +365,13 @@ class Multiplexer {
 	 * @description Sockets.subchannelBroadcast message handler.
 	 * @param {string} channelid
 	 * @param {string} message
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onSubchannelBroadcast(channelid, message) {
 		let channel = this.channels.get(channelid);
 		if (!channel) return false;
 
-		/** @type {RegExpExecArray | null} */
-		let matches = SUBCHANNEL_MESSAGE_REGEX.exec(message);
-		if (!matches) return false;
-
-		let [match, msg1, msg2, msg3] = matches.splice(0);
+		let msgs = {};
 		channel.forEach(
 			/** @param {string} subchannelid */
 			/** @param {string} socketid */
@@ -404,20 +379,21 @@ class Multiplexer {
 				let socket = this.sockets.get(socketid);
 				if (!socket) return;
 
-				switch (subchannelid) {
-				case DEFAULT_SUBCHANNEL:
-					socket.write(msg1);
-					break;
-				case P1_SUBCHANNEL:
-					socket.write(msg2);
-					break;
-				case P2_SUBCHANNEL:
-					socket.write(msg3);
-					break;
-				default:
-					Monitor.debug(`Sockets worker ${cluster.worker.id} received a message targeted at an unknown subchannel: ${match}`);
-					break;
+				if (!(subchannelid in msgs)) {
+					switch (subchannelid) {
+					case DEFAULT_SUBCHANNEL_ID:
+						msgs[subchannelid] = message.replace(SUBCHANNEL_MESSAGE_REGEX, '$1');
+						break;
+					case P1_SUBCHANNEL_ID:
+						msgs[subchannelid] = message.replace(SUBCHANNEL_MESSAGE_REGEX, '$2');
+						break;
+					case P2_SUBCHANNEL_ID:
+						msgs[subchannelid] = message.replace(SUBCHANNEL_MESSAGE_REGEX, '$3');
+						break;
+					}
 				}
+
+				socket.write(msgs[subchannelid]);
 			}
 		);
 
@@ -426,15 +402,25 @@ class Multiplexer {
 }
 
 if (cluster.isWorker) {
+	const sockjs = require('sockjs');
+	const StaticServer = require('node-static').Server;
+
+	/** @type {any} */
+	global.Config = require('./config/config');
+
 	if (process.env.PSPORT) Config.port = +process.env.PSPORT;
 	if (process.env.PSBINDADDR) Config.bindaddress = process.env.PSBINDADDR;
 	if (+process.env.PSNOSSL) Config.ssl = null;
-	if (Config.crashguard) {
-		// Graceful crash.
-		process.on('uncaughtException', /** @param {Error} err */ err => {
-			require('./crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`, true);
-		});
-	}
+
+	// Graceful crash.
+	process.on('uncaughtException',
+		/** @param {Error} err */
+		err => {
+			if (Config.crashguard) {
+				require('./crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`, true);
+			}
+		}
+	);
 
 	// This is optional. If ofe is installed, it will take a heapdump if the
 	// process runs out of memory.
@@ -474,6 +460,7 @@ if (cluster.isWorker) {
 						Config.customhttpresponse(request, response)) {
 					return;
 				}
+
 				let server;
 				if (request.url === '/custom.css') {
 					server = cssserver;
@@ -498,18 +485,18 @@ if (cluster.isWorker) {
 				);
 			});
 		};
+
 		app.on('request', staticRequestHandler);
 		if (appssl) appssl.on('request', staticRequestHandler);
 	} catch (e) {}
 
 	// Launch the SockJS server.
-	/** @type {any} */
 	const server = sockjs.createServer({
 		sockjs_url: '//play.pokemonshowdown.com/js/lib/sockjs-1.1.1-nwjsfix.min.js',
 		/** @param {string} severity */
 		/** @param {string} message */
 		log: (severity, message) => {
-			if (severity === 'error') Monitor.debug(`Sockets worker SockJS error: ${message}`);
+			if (severity === 'error') console.error(`Sockets worker SockJS error: ${message}`);
 		},
 		prefix: '/showdown',
 	});
@@ -520,24 +507,25 @@ if (cluster.isWorker) {
 	// messages upstream.
 	const multiplexer = new Multiplexer();
 
-	process.on('message', /** @param {string} data */ data => {
-		// console.log('worker received: ' + data);
-		let ret = multiplexer.receiveDownstream(data);
-		if (!ret) {
-			Monitor.debug(`Sockets worker IPC error: failed to parse downstream message: ${data}`);
+	process.on('message',
+		/** @param {string} data */
+		data => {
+			multiplexer.receiveDownstream(data);
 		}
-	});
+	);
 
 	process.on('disconnect', () => {
 		process.exit(0);
 	});
 
-	server.on('connection', /** @param {any} socket */ socket => {
-		multiplexer.onSocketConnect(socket);
-	});
+	server.on('connection',
+		/** @param {any} socket */
+		socket => {
+			multiplexer.onSocketConnect(socket);
+		}
+	);
 
 	server.installHandlers(app, {});
-	if (!Config.bindaddress) Config.bindaddress = '0.0.0.0';
 	app.listen(Config.port, Config.bindaddress);
 	console.log(`Worker ${cluster.worker.id} now listening on ${Config.bindaddress}:${Config.port}`);
 
@@ -549,28 +537,15 @@ if (cluster.isWorker) {
 
 	console.log(`Test your server at http://${Config.bindaddress === '0.0.0.0' ? 'localhost' : Config.bindaddress}:${Config.port}`);
 
-	require('./repl').start('sockets-', `${cluster.worker.id}-${process.pid}`, /** @param {string} cmd */ cmd => eval(cmd));
+	require('./repl').start(
+		'sockets-',
+		`${cluster.worker.id}-${process.pid}`,
+		/** @param {string} cmd */
+		cmd => eval(cmd)
+	);
 }
 
 module.exports = {
-	TOKENS: {
-		EVAL,
-		SOCKET_CONNECT,
-		SOCKET_DISCONNECT,
-		SOCKET_SEND,
-		SOCKET_RECEIVE,
-		CHANNEL_ADD,
-		CHANNEL_REMOVE,
-		CHANNEL_BROADCAST,
-		SUBCHANNEL_MOVE,
-		SUBCHANNEL_BROADCAST,
-	},
-
-	SUBCHANNEL_IDS: {
-		DEFAULT_SUBCHANNEL,
-		P1_SUBCHANNEL,
-		P2_SUBCHANNEL,
-	},
-
+	SUBCHANNEL_MESSAGE_REGEX,
 	Multiplexer,
 };

@@ -15,21 +15,11 @@
 const cluster = require('cluster');
 const EventEmitter = require('events');
 
-if (!global.Config) global.Config = require('./config/config');
-
 if (cluster.isMaster) {
 	cluster.setupMaster({
 		exec: require('path').resolve(__dirname, 'sockets-workers'),
 	});
 }
-
-// FIXME: this needs to go to dev-tools/globals.ts, but @types/node and
-// @types/sockjs-node must be installed before that can be done.
-/** @typedef {any} NodeJSWorker */
-cluster.Worker; // eslint-disable-line no-unused-expressions
-/** @typedef {any} Socket */
-require('net').Socket; // eslint-disable-line no-unused-expressions
-/** @typedef {NodeJSWorker | GoWorker} Worker */
 
 /**
  * @description IPC delimiter byte. This byte must stringify as a hexadeimal
@@ -41,7 +31,6 @@ const DELIM = '\x03';
 
 /**
  * @class WorkerWrapper
- * @implements NodeJS.Cluster.Worker
  * @description A wrapper class for native Node.js Worker and GoWorker
  * instances. This parses upstream messages from both types of workers and
  * cleans up when workers crash or get killed before respawning them. In other
@@ -49,14 +38,7 @@ const DELIM = '\x03';
  * them accordingly.
  */
 class WorkerWrapper {
-	/**
-	 * @param {Worker} worker
-	 * @prop {number} id;
-	 * @prop {Worker} worker
-	 * @prop {NodeJS.ChildProcess | null} process
-	 * @prop {boolean | undefined} exitedAfterDisconnect
-	 * @prop {(ip: string) => boolean} isTrustedProxyIp
-	 */
+	/** @param {any} worker */
 	constructor(worker) {
 		this.id = worker.id;
 		this.worker = worker;
@@ -74,7 +56,7 @@ class WorkerWrapper {
 			// events.
 		});
 		worker.once('disconnect',
-			/** @param {string} data */
+			/** @param {string=} data */
 			data => {
 				if (this.exitedAfterDisconnect !== undefined) return;
 				this.exitedAfterDisconnect = true;
@@ -94,7 +76,7 @@ class WorkerWrapper {
 
 	/**
 	 * @description Worker#suicide getter wrapper
-	 * @returns {boolean | undefined}
+	 * @return {boolean | void}
 	 */
 	get suicide() {
 		return this.exitedAfterDisconnect;
@@ -103,7 +85,6 @@ class WorkerWrapper {
 	/**
 	 * @description Worker#suicide setter wrapper
 	 * @param {boolean} val
-	 * @returns {void}
 	 */
 	set suicide(val) {
 		this.exitedAfterDisconnect = val;
@@ -113,7 +94,6 @@ class WorkerWrapper {
 	/**
 	 * @description Worker#kill wrapper
 	 * @param {string} signal
-	 * @returns {void}
 	 */
 	kill(signal = 'SIGTERM') {
 		return this.worker.kill(signal);
@@ -122,7 +102,6 @@ class WorkerWrapper {
 	/**
 	 * @description Worker#destroy wrapper
 	 * @param {string} signal
-	 * @returns {void}
 	 */
 	destroy(signal) {
 		return this.kill(signal);
@@ -131,16 +110,14 @@ class WorkerWrapper {
 	/**
 	 * @description Worker#send wrapper
 	 * @param {string} message
-	 * @param {any?} sendHandle
-	 * @returns {void}
 	 */
-	send(message, sendHandle) {
-		return this.worker.send(message, sendHandle);
+	send(message) {
+		return this.worker.send(message);
 	}
 
 	/**
 	 * @description Worker#isConnected wrapper
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	isConnected() {
 		return this.worker.isConnected();
@@ -148,7 +125,7 @@ class WorkerWrapper {
 
 	/**
 	 * @description Worker#isDead wrapper
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	isDead() {
 		return this.worker.isDead();
@@ -159,7 +136,7 @@ class WorkerWrapper {
 	 * worker's child process for the 'message' event handler.
 	 * @param {string} params
 	 * @param {number} count
-	 * @returns {string[]}
+	 * @return {string[]}
 	 */
 	parseParams(params, count) {
 		let i = 0;
@@ -194,7 +171,7 @@ class WorkerWrapper {
 	 * to not be trusted as per the DNSBL.
 	 * @param {string} ip
 	 * @param {string} header
-	 * @returns {string}
+	 * @return {string}
 	 */
 	pluckUntrustedIp(ip, header = '') {
 		if (!this.isTrustedProxyIp(ip)) {
@@ -218,7 +195,7 @@ class WorkerWrapper {
 	 * of command the incoming IPC message uses, then parses its parametres and
 	 * calls the appropriate Users method.
 	 * @param {string} data
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	onMessage(data) {
 		// console.log('master received: ' + data);
@@ -236,9 +213,6 @@ class WorkerWrapper {
 		case '<':
 			Users.socketReceive(this.worker, this.id, ...this.parseParams(params, 2));
 			break;
-		default:
-			Monitor.debug(`Sockets: master received unknown IPC command type: ${data}`);
-			break;
 		}
 	}
 
@@ -246,10 +220,11 @@ class WorkerWrapper {
 	 * @description 'disconnect' event handler for the worker. Cleans up any
 	 * remaining users whose sockets were contained by the worker's child
 	 * process, then attempts to respawn it..
-	 * @param {string} data
-	 * @returns {void}
+	 * @param {string | void} data
 	 */
 	onDisconnect(data) {
+		if (!data) return;
+
 		require('./crashlogger')(new Error(`Worker ${this.id} abruptly died with the following stack trace: ${data}`), 'The main process');
 		console.error(`${Users.socketDisconnectAll(this.worker)} connections were lost.`);
 		spawnWorker();
@@ -261,7 +236,6 @@ class WorkerWrapper {
 	 * workers.
 	 * @param {number} code
 	 * @param {string?} signal
-	 * @returns {void}
 	 */
 	onExit(code, signal) {
 		require('./crashlogger')(new Error(`Worker ${this.id} abruptly died with code ${code} and signal ${signal}`), 'The main process');
@@ -279,15 +253,7 @@ class WorkerWrapper {
  * connection to the worker's server before performing IPC with it.
  */
 class GoWorker extends EventEmitter {
-	/**
-	 * @param {number} id
-	 * @prop {number} id
-	 * @prop {NodeJS.ChildProcess | null} process
-	 * @prop {boolean | undefined} exitedAfterDisconnect
-	 * @prop {NodeJS.net.Server | null} server
-	 * @prop {NodeJS.net.NodeSocket | null} connection
-	 * @prop {string[]} buffer
-	 */
+	/** @param {number} id */
 	constructor(id) {
 		super();
 
@@ -306,7 +272,6 @@ class GoWorker extends EventEmitter {
 	/**
 	 * @description Worker#kill mock
 	 * @param {string} signal
-	 * @returns {void}
 	 */
 	kill(signal = 'SIGTERM') {
 		if (this.isConnected()) this.connection.end();
@@ -318,7 +283,6 @@ class GoWorker extends EventEmitter {
 	/**
 	 * @description Worker#destroy mock
 	 * @param {string=} signal
-	 * @returns {void}
 	 */
 	destroy(signal) {
 		return this.kill(signal);
@@ -327,10 +291,8 @@ class GoWorker extends EventEmitter {
 	/**
 	 * @description Worker#send mock
 	 * @param {string} message
-	 * @param {any?} sendHandle
-	 * @returns {void}
 	 */
-	send(message, sendHandle) { // eslint-disable-line no-unused-vars
+	send(message) {
 		if (!this.isConnected()) {
 			this.buffer.push(message);
 			return;
@@ -342,12 +304,12 @@ class GoWorker extends EventEmitter {
 			});
 		}
 
-		return this.connection.write(JSON.stringify(message) + DELIM);
+		this.connection.write(JSON.stringify(message) + DELIM);
 	}
 
 	/**
 	 * @description Worker#isConnected mock
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	isConnected() {
 		return this.connection && !this.connection.destroyed;
@@ -355,7 +317,7 @@ class GoWorker extends EventEmitter {
 
 	/**
 	 * @description Worker#isDead mock
-	 * @returns {boolean}
+	 * @return {boolean}
 	 */
 	isDead() {
 		return !this.process || this.connection.exitCode !== null || this.connection.statusCode !== null;
@@ -364,10 +326,9 @@ class GoWorker extends EventEmitter {
 	/**
 	 * @description Spawns the TCP server through which IPC with the child
 	 * process is handled.
-	 * @returns {boolean}
 	 */
 	spawnServer() {
-		if (!this.isDead()) return false;
+		if (!this.isDead()) return;
 
 		this.server = require('net').createServer();
 		this.server.on('error', console.error);
@@ -389,10 +350,9 @@ class GoWorker extends EventEmitter {
 	/**
 	 * @description Spawns the Go child process. Once the process has started,
 	 * it will make a connection to the worker's TCP server.
-	 * @returns {void}
 	 */
 	spawnChild() {
-		if (!this.server) return this.spawnServer();
+		if (!this.server) return;
 		this.process = require('child_process').spawn(
 			`${process.env.GOPATH}/bin/sockets`, [], {
 				env: {
@@ -424,8 +384,7 @@ class GoWorker extends EventEmitter {
 	/**
 	 * @description 'connection' event handler for the TCP server. Begins
 	 * the parsing of incoming IPC messages.
-	 * @param {Socket} connection
-	 * @returns {void}
+	 * @param {any} connection
 	 */
 	bootstrapChild(connection) {
 		this.connection = connection;
@@ -447,7 +406,7 @@ class GoWorker extends EventEmitter {
 
 /**
  * @description Map of worker IDs to worker processes.
- * @type {Map<number, Worker>}
+ * @type {Map<number, WorkerWrapper>}
  */
 const workers = new Map();
 
@@ -459,7 +418,7 @@ let nextWorkerid = 0;
 
 /**
  * @description Spawns a new worker process.
- * @returns {Worker}
+ * @return {WorkerWrapper}
  */
 function spawnWorker() {
 	let worker;
@@ -484,7 +443,6 @@ function spawnWorker() {
  * @param {any} port
  * @param {any} bindAddress
  * @param {any} workerCount
- * @returns {void}
  */
 function listen(port, bindAddress, workerCount) {
 	if (port !== undefined && !isNaN(port)) {
@@ -522,8 +480,8 @@ function listen(port, bindAddress, workerCount) {
 
 /**
  * @description Kills a worker process using the given worker object.
- * @param {Worker} worker
- * @returns {number}
+ * @param {WorkerWrapper} worker
+ * @return {number}
  */
 function killWorker(worker) {
 	let count = Users.socketDisconnectAll(worker);
@@ -537,23 +495,22 @@ function killWorker(worker) {
 /**
  * @description Kills a worker process using the given worker PID.
  * @param {number} pid
- * @returns {number | false}
+ * @return {number | false}
  */
 function killPid(pid) {
-	workers.forEach(worker => {
+	for (let [workerid, worker] of workers) { // eslint-disable-line no-unused-vars
 		if (pid === worker.process.pid) {
-			return this.killWorker(worker);
+			return killWorker(worker);
 		}
-	});
+	}
 	return false;
 }
 
 /**
  * @description Sends a message to a socket in a given worker by ID.
- * @param {Worker} worker
+ * @param {WorkerWrapper} worker
  * @param {string} socketid
  * @param {string} message
- * @returns {void}
  */
 function socketSend(worker, socketid, message) {
 	worker.send(`>${socketid}\n${message}`);
@@ -561,9 +518,8 @@ function socketSend(worker, socketid, message) {
 
 /**
  * @description Forcefully disconnects a socket in a given worker by ID.
- * @param {Worker} worker
+ * @param {WorkerWrapper} worker
  * @param {string} socketid
- * @returns {void}
  */
 function socketDisconnect(worker, socketid) {
 	worker.send(`!${socketid}`);
@@ -574,7 +530,6 @@ function socketDisconnect(worker, socketid) {
  * all workers.
  * @param {string} channelid
  * @param {string} message
- * @returns {void}
  */
 function channelBroadcast(channelid, message) {
 	workers.forEach(worker => {
@@ -585,10 +540,9 @@ function channelBroadcast(channelid, message) {
 /**
  * @description Broadcasts a message to all sockets in a given channel and a
  * given worker.
- * @param {Worker} worker
+ * @param {WorkerWrapper} worker
  * @param {string} channelid
  * @param {string} message
- * @returns {void}
  */
 function channelSend(worker, channelid, message) {
 	worker.send(`#${channelid}\n${message}`);
@@ -596,10 +550,9 @@ function channelSend(worker, channelid, message) {
 
 /**
  * @description Adds a socket to a given channel in a given worker by ID.
- * @param {Worker} worker
+ * @param {WorkerWrapper} worker
  * @param {string} channelid
  * @param {string} socketid
- * @returns {void}
  */
 function channelAdd(worker, channelid, socketid) {
 	worker.send(`+${channelid}\n${socketid}`);
@@ -607,10 +560,9 @@ function channelAdd(worker, channelid, socketid) {
 
 /**
  * @description Removes a socket from a given channel in a given worker by ID.
- * @param {Worker} worker
+ * @param {WorkerWrapper} worker
  * @param {string} channelid
  * @param {string} socketid
- * @returns {void}
  */
 function channelRemove(worker, channelid, socketid) {
 	worker.send(`-${channelid}\n${socketid}`);
@@ -621,7 +573,6 @@ function channelRemove(worker, channelid, socketid) {
  * across three subchannels in a given channel across all workers.
  * @param {string} channelid
  * @param {string} message
- * @returns {void}
  */
 function subchannelBroadcast(channelid, message) {
 	workers.forEach(worker => {
@@ -632,7 +583,7 @@ function subchannelBroadcast(channelid, message) {
 /**
  * @description Moves a given socket to a different subchannel in a channel by
  * ID in the given worker.
- * @param {Worker} worker
+ * @param {WorkerWrapper} worker
  * @param {string} channelid
  * @param {string} subchannelid
  * @param {string} socketid
