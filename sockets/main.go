@@ -40,10 +40,6 @@ func main() {
 	// Set up routing.
 	r := mux.NewRouter()
 
-	staticDir, _ := filepath.Abs("./static")
-	r.PathPrefix("/static/").
-		Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
-
 	opts := sockjs.Options{
 		SockJSURL:       "//play.pokemonshowdown.com/js/lib/sockjs-1.1.1-nwjsfix.min.js",
 		Websocket:       true,
@@ -55,21 +51,17 @@ func main() {
 	r.PathPrefix("/showdown").
 		Handler(sockjs.NewHandler("/showdown", opts, smux.Handler))
 
-	customCSSDir, _ := filepath.Abs("./config")
-	r.Handle("/custom.css", http.FileServer(http.Dir(customCSSDir)))
+	customCssDir, _ := filepath.Abs("./config")
+	r.Handle("/custom.css", http.FileServer(http.Dir(customCssDir)))
 
 	avatarDir, _ := filepath.Abs("./config/avatars")
 	r.PathPrefix("/avatars/").
 		Handler(http.StripPrefix("/avatars/", http.FileServer(http.Dir(avatarDir))))
 
 	indexPath, _ := filepath.Abs("./static/index.html")
-	indexPage, _ := ioutil.ReadFile(indexPath)
 	r.PathPrefix("/{roomid:[A-Za-z0-9][A-Za-z0-9-]*}").
 		HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Serves index.html with status 200 if a roomid is the path in the
-			// URL and wasn't already redirected to / by the client.
-			w.WriteHeader(http.StatusFound)
-			w.Write(indexPage)
+			http.ServeFile(w, r, indexPath)
 		})
 
 	notFoundPath, _ := filepath.Abs("./static/404.html")
@@ -79,6 +71,9 @@ func main() {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write(notFoundPage)
 		})
+
+	staticDir, _ := filepath.Abs("./static")
+	r.Handle("/", http.FileServer(http.Dir(staticDir)))
 
 	// Begin serving over HTTP.
 	go func(ba string, port string) {

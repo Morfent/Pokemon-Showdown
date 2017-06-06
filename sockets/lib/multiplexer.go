@@ -147,7 +147,7 @@ func (m *Multiplexer) socketRemove(sid string, forced bool) error {
 	if ok {
 		delete((*m).sockets, sid)
 	} else {
-		return fmt.Errorf("Sockets: attempted to remove socket of ID %v that doesn't exist", sid)
+		return fmt.Errorf("Sockets: attempted to remove non-existent socket of ID %v", sid)
 	}
 
 	if forced {
@@ -176,7 +176,7 @@ func (m *Multiplexer) socketReceive(sid string, msg string) error {
 	}
 
 	// This should never happen. If it does, it's likely a SockJS bug.
-	return fmt.Errorf("Sockets: received a message for a non-existent socket of ID %v: %v", sid, msg)
+	return fmt.Errorf("Sockets: received message for a non-existent socket of ID %v: %v", sid, msg)
 }
 
 func (m *Multiplexer) socketSend(sid string, msg string) error {
@@ -219,7 +219,7 @@ func (m *Multiplexer) channelRemove(cid string, sid string) error {
 	c, ok := m.channels[cid]
 	if ok {
 		if _, ok = c[sid]; !ok {
-			return fmt.Errorf("Sockets: failed to remove nonexistent socket of ID %v from channel %v", sid, cid)
+			return fmt.Errorf("Sockets: failed to remove non-existent socket of ID %v from channel %v", sid, cid)
 		}
 	} else {
 		// This happens on user-initiated disconnect. Mitigate until this race
@@ -252,11 +252,9 @@ func (m *Multiplexer) channelBroadcast(cid string, msg string) error {
 	for sid := range c {
 		var s sockjs.Session
 		if s, ok = m.sockets[sid]; ok {
-			if m.conn.Listening() {
-				s.Send(msg)
-			}
+			s.Send(msg)
 		} else {
-			delete(c, sid)
+			return fmt.Errorf("Sockets: attempted to broadcast to non-existent socket of ID %v in channel %v: %v", sid, cid, msg)
 		}
 	}
 
@@ -269,11 +267,10 @@ func (m *Multiplexer) subchannelMove(cid string, scid byte, sid string) error {
 
 	c, ok := m.channels[cid]
 	if !ok {
-		return fmt.Errorf("Sockets: attempted to move socket of ID %v in channel %v, which does not exist, to subchannel %v", sid, cid, scid)
+		return fmt.Errorf("Sockets: attempted to move socket of ID %v in non-existent channel %v to subchannel %v", sid, cid, scid)
 	}
 
 	c[sid] = scid
-
 	return nil
 }
 
@@ -307,9 +304,7 @@ func (m *Multiplexer) subchannelBroadcast(cid string, msg string) error {
 			}
 		}
 
-		if m.conn.Listening() {
-			s.Send(msgs[scid])
-		}
+		s.Send(msgs[scid])
 	}
 
 	return nil
@@ -322,9 +317,14 @@ func (m *Multiplexer) Handler(s sockjs.Session) {
 	for {
 		msg, err := s.Recv()
 		if err != nil {
-			fmt.Printf("Sockets: SockJS error on message receive for socket of ID %v: %v", sid, err)
+			if err == sockjs.ErrSessionNotOpen && s.GetSessionState() == sockjs.SessionClosed {
+				// User disconnected.
+			} else {
+				fmt.Printf("Sockets: SockJS error on message receive for socket of ID %v: %v\n", sid, err)
+			}
 			break
 		}
+
 		if err = m.socketReceive(sid, msg); err != nil {
 			fmt.Printf("%v\n", err)
 			break
