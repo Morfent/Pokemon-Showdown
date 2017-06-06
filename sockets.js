@@ -42,74 +42,63 @@ class WorkerWrapper {
 	constructor(worker) {
 		this.id = worker.id;
 		this.worker = worker;
-		this.process = worker.process;
-		this.exitedAfterDisconnect = worker.exitedAfterDisconnect;
 		this.isTrustedProxyIp = Dnsbl.checker(Config.proxyip);
 
 		worker.on('message',
 			/** @param {string} data */
 			data => this.onMessage(data)
 		);
-		worker.on('error', () => {
-			// Ignore. Neither kind of child process ever prints to stderr
-			// without throwing/panicking and emitting the diconnect/exit
-			// events.
-		});
+		worker.on('error', () => {});
 		worker.once('disconnect',
-			/** @param {string=} data */
-			data => {
-				if (this.exitedAfterDisconnect !== undefined) return;
-				this.exitedAfterDisconnect = true;
-				process.nextTick(() => this.onDisconnect(data));
-			}
-		);
-		worker.once('exit',
-			/** @param {number} code */
-			/** @param {string} signal */
-			(code, signal) => {
-				if (this.exitedAfterDisconnect !== undefined) return;
-				this.exitedAfterDisconnect = false;
-				process.nextTick(() => this.onExit(code, signal));
-			}
+			/** @param {Error?} err */
+			err => this.onDisconnect(err)
 		);
 	}
 
 	/**
-	 * @description Worker#suicide getter wrapper
+	 * @description Worker process getter
+	 * @return {any}
+	 */
+	get process() {
+		return this.worker.process;
+	}
+
+	/**
+	 * @description Worker exitedAfterDisconnect getter
+	 * @return {boolean | void}
+	 */
+	get exitedAfterDisconnect() {
+		return this.worker.exitedAfterDisconnect;
+	}
+
+	/**
+	 * @description Worker suicide getter
 	 * @return {boolean | void}
 	 */
 	get suicide() {
-		return this.exitedAfterDisconnect;
-	}
-
-	/**
-	 * @description Worker#suicide setter wrapper
-	 * @param {boolean} val
-	 */
-	set suicide(val) {
-		this.exitedAfterDisconnect = val;
-		this.worker.exitedAfterDisconnect = val;
+		return this.worker.exitedAfterDisconnect;
 	}
 
 	/**
 	 * @description Worker#kill wrapper
-	 * @param {string} signal
+	 * @param {string=} signal
 	 */
-	kill(signal = 'SIGTERM') {
+	kill(signal) {
 		return this.worker.kill(signal);
 	}
 
 	/**
 	 * @description Worker#destroy wrapper
-	 * @param {string} signal
+	 * @param {string=} signal
 	 */
 	destroy(signal) {
-		return this.kill(signal);
+		return this.worker.kill(signal);
 	}
 
 	/**
 	 * @description Worker#send wrapper
 	 * @param {string} message
+	 * @return {boolean}
 	 */
 	send(message) {
 		return this.worker.send(message);
@@ -217,28 +206,11 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description 'disconnect' event handler for the worker. Cleans up any
-	 * remaining users whose sockets were contained by the worker's child
-	 * process, then attempts to respawn it..
-	 * @param {string | void} data
+	 * @description Worker 'disconnect' event handler.
+	 * @param {Error?} err
 	 */
-	onDisconnect(data) {
-		if (!data) return;
-
-		require('./crashlogger')(new Error(`Worker ${this.id} abruptly died with the following stack trace: ${data}`), 'The main process');
-		console.error(`${Users.socketDisconnectAll(this.worker)} connections were lost.`);
-		spawnWorker();
-	}
-
-	/**
-	 * @description 'exit' event handler for the worker. Only used by GoWorker
-	 * instances, since the 'disconnect' event is only available for Node.js
-	 * workers.
-	 * @param {number} code
-	 * @param {string?} signal
-	 */
-	onExit(code, signal) {
-		require('./crashlogger')(new Error(`Worker ${this.id} abruptly died with code ${code} and signal ${signal}`), 'The main process');
+	onDisconnect(err) {
+		require('./crashlogger')(new Error(`Worker ${this.id} abruptly died with the following stack trace: ${err && err.stack}`), 'The main process');
 		console.error(`${Users.socketDisconnectAll(this.worker)} connections were lost.`);
 		spawnWorker();
 	}
@@ -258,15 +230,19 @@ class GoWorker extends EventEmitter {
 		super();
 
 		this.id = id;
-		this.process = null;
 		this.exitedAfterDisconnect = undefined;
 
-		this.server = null;
-		this.connection = null;
 		/** @type {string[]} */
 		this.buffer = [];
+		/** @type {Error?} */
+		this.error = null;
 
-		process.nextTick(() => this.spawnServer());
+		this.process = null;
+		this.connection = null;
+		this.server = require('net').createServer();
+		this.server.once('connection', connection => this.onChildConnect(connection));
+		this.server.on('error', () => {});
+		this.server.listen(() => this.spawnChild());
 	}
 
 	/**
@@ -274,10 +250,9 @@ class GoWorker extends EventEmitter {
 	 * @param {string} signal
 	 */
 	kill(signal = 'SIGTERM') {
-		if (this.isConnected()) this.connection.end();
-		if (!this.isDead() && this.process) this.process.kill(signal);
-		if (this.server) this.server.close();
-		this.exitedAfterDisconnect = false;
+		if (this.isConnected()) this.connection.close();
+		if (this.process && !this.isDead()) this.process.kill(signal);
+		this.server.close();
 	}
 
 	/**
@@ -291,11 +266,12 @@ class GoWorker extends EventEmitter {
 	/**
 	 * @description Worker#send mock
 	 * @param {string} message
+	 * @return {boolean}
 	 */
 	send(message) {
 		if (!this.isConnected()) {
 			this.buffer.push(message);
-			return;
+			return false;
 		}
 
 		if (this.buffer.length) {
@@ -304,7 +280,7 @@ class GoWorker extends EventEmitter {
 			});
 		}
 
-		this.connection.write(JSON.stringify(message) + DELIM);
+		return this.connection.write(JSON.stringify(message) + DELIM);
 	}
 
 	/**
@@ -324,35 +300,10 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * @description Spawns the TCP server through which IPC with the child
-	 * process is handled.
-	 */
-	spawnServer() {
-		if (!this.isDead()) return;
-
-		this.server = require('net').createServer();
-		this.server.on('error', console.error);
-		this.server.once('listening', () => {
-			// Spawn the child process after the TCP server has finished
-			// launching to allow it to connect to it for IPC.
-			process.nextTick(() => this.spawnChild());
-		});
-		// When the child process finally connects to the TCP server we can
-		// begin communicating with it using a random port.
-		this.server.listen(() => {
-			if (!this.server) return;
-			this.server.once('connection', connection => {
-				process.nextTick(() => this.bootstrapChild(connection));
-			});
-		});
-	}
-
-	/**
 	 * @description Spawns the Go child process. Once the process has started,
 	 * it will make a connection to the worker's TCP server.
 	 */
 	spawnChild() {
-		if (!this.server) return;
 		this.process = require('child_process').spawn(
 			`${process.env.GOPATH}/bin/sockets`, [], {
 				env: {
@@ -367,18 +318,17 @@ class GoWorker extends EventEmitter {
 					}),
 				},
 				stdio: ['inherit', 'inherit', 'pipe'],
-				shell: true,
 			}
 		);
 
-		this.process.once('exit', (code, signal) => {
-			process.nextTick(() => this.emit('exit', code, signal));
-		});
-
 		this.process.stderr.setEncoding('utf8');
-		this.process.stderr.once('data', data => {
-			process.nextTick(() => this.emit('error', data));
-		});
+		this.process.stderr.once('data',
+			/** @param {string} data */
+			data => {
+				this.error = new Error(data);
+			}
+		);
+		this.process.once('exit', () => this.emit('disconnect', this.error));
 	}
 
 	/**
@@ -386,7 +336,7 @@ class GoWorker extends EventEmitter {
 	 * the parsing of incoming IPC messages.
 	 * @param {any} connection
 	 */
-	bootstrapChild(connection) {
+	onChildConnect(connection) {
 		this.connection = connection;
 		this.connection.setEncoding('utf8');
 		this.connection.on('data',
@@ -398,8 +348,6 @@ class GoWorker extends EventEmitter {
 				});
 			}
 		);
-
-		// Leave the error handling to the process, not the connection.
 		this.connection.on('error', () => {});
 	}
 }
