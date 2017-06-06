@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -19,31 +20,30 @@ func main() {
 	// variable by the parent process.
 	config, err := sockets.NewConfig("PS_CONFIG")
 	if err != nil {
-		log.Fatal("Sockets: failed to read parent's config settings from environment")
+		log.Fatalf("Sockets: failed to read parent's config settings from environment: %v")
 	}
 
-	// Instantiate the socket multiplexer and IPC struct..
+	// Instantiate the socket multiplexer and IPC struct.
 	smux := sockets.NewMultiplexer()
 	conn, err := sockets.NewConnection("PS_IPC_PORT")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("%v", err)
 	}
 	defer conn.Close()
 
 	// Begin listening for incoming messages from sockets and the TCP
 	// connection to the parent process. For now, they'll just get enqueued
-	// for workers to manage later..
+	// for workers to manage later.
 	smux.Listen(conn)
 	conn.Listen(smux)
 
-	// Set up server routing.
+	// Set up routing.
 	r := mux.NewRouter()
 
 	staticDir, _ := filepath.Abs("./static")
 	r.PathPrefix("/static/").
 		Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
 
-	// Set up the SockJS server.
 	opts := sockjs.Options{
 		SockJSURL:       "//play.pokemonshowdown.com/js/lib/sockjs-1.1.1-nwjsfix.min.js",
 		Websocket:       true,
@@ -60,20 +60,33 @@ func main() {
 
 	avatarDir, _ := filepath.Abs("./config/avatars")
 	r.PathPrefix("/avatars/").
-		Handler(http.FileServer(http.Dir(avatarDir)))
+		Handler(http.StripPrefix("/avatars/", http.FileServer(http.Dir(avatarDir))))
 
+	indexPath, _ := filepath.Abs("./static/index.html")
+	indexPage, _ := ioutil.ReadFile(indexPath)
+	r.PathPrefix("/{roomid:[A-Za-z0-9][A-Za-z0-9-]*}").
+		HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Serves index.html with status 200 if a roomid is the path in the
+			// URL and wasn't already redirected to / by the client.
+			w.WriteHeader(http.StatusFound)
+			w.Write(indexPage)
+		})
+
+	notFoundPath, _ := filepath.Abs("./static/404.html")
+	notFoundPage, _ := ioutil.ReadFile(notFoundPath)
 	r.NotFoundHandler =
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/static/404.html", http.StatusSeeOther)
+			w.WriteHeader(http.StatusNotFound)
+			w.Write(notFoundPage)
 		})
 
 	// Begin serving over HTTP.
 	go func(ba string, port string) {
 		srv := &http.Server{
 			Handler: r,
-			Addr:    ba + port}
+			Addr:    ba + port,
+		}
 
-		// Again, IPv6 is verboten until PS can support it.
 		addr, err := net.ResolveTCPAddr("tcp4", ba+port)
 		if err != nil {
 			log.Fatalf("Sockets: failed to resolve the TCP address of the parent's server: %v", err)
@@ -93,7 +106,6 @@ func main() {
 			fmt.Printf("Test your server at http://%v%v/\n", ba, port)
 		}
 
-		// This will block indefinitely until http.Serve returns an error.
 		if err = http.Serve(ln, r); err != nil {
 			log.Fatalf("Sockets: HTTP server failed with error: %v", err)
 		}
@@ -113,7 +125,6 @@ func main() {
 				TLSConfig: &tls.Config{Certificates: []tls.Certificate{certs}},
 			}
 
-			// IPv6 is verboten until PS can support it.
 			var ln net.Listener
 			ln, err = tls.Listen("tcp4", srv.Addr, srv.TLSConfig)
 			defer ln.Close()
@@ -123,7 +134,6 @@ func main() {
 
 			fmt.Printf("Go workers now listening for SSL on port %v\n", port)
 
-			// This will block indefinitely until http.Serve returns an error.
 			if err := http.Serve(ln, r); err != nil {
 				log.Fatalf("Sockets: HTTPS server failed: %v", err)
 			}
