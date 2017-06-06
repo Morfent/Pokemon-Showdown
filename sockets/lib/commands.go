@@ -37,12 +37,12 @@ type Command struct {
 // The multiplexer and the IPC connection both implement this interface. Its
 // purpose is solely to allow the two structs to be used in Command.
 type CommandIO interface {
-	Process(Command) (err error) // Invokes one of its methods using the command's token and parametres..
+	Process(Command) (err error) // Invokes one of its methods using the command's token and parametres.
 }
 
 func getCount(token byte) (count int) {
 	// Get the number of params in the paramstr based on the token type.
-	// Cmmmand.Params uses this to quickly get a slice of params, so the
+	// Command. Params uses this to quickly get a slice of params, so the
 	// multiplexer and the IPC connection don't have to parse the paramstr
 	// themselves.
 	switch token {

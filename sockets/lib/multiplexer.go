@@ -147,14 +147,13 @@ func (m *Multiplexer) socketRemove(sid string, forced bool) error {
 	if ok {
 		delete((*m).sockets, sid)
 	} else {
-		m.smux.Unlock()
 		return fmt.Errorf("Sockets: attempted to remove socket of ID %v that doesn't exist", sid)
 	}
 
 	if forced {
 		s.Close(2010, "Normal closure")
 	} else {
-		// User disconnected on their own. Poke the parent process to clean up.
+		// User-initiated disconnect. Poke the parent process to clean up.
 		if m.conn.Listening() {
 			cmd := BuildCommand(SOCKET_DISCONNECT, sid, m.conn)
 			CmdQueue <- cmd
@@ -176,20 +175,25 @@ func (m *Multiplexer) socketReceive(sid string, msg string) error {
 		return nil
 	}
 
-	return fmt.Errorf("Sockets: received a message for a socket of ID %v that does not exist: %v", sid, msg)
+	// This should never happen. If it does, it's likely a SockJS bug.
+	return fmt.Errorf("Sockets: received a message for a non-existent socket of ID %v: %v", sid, msg)
 }
 
 func (m *Multiplexer) socketSend(sid string, msg string) error {
 	m.smux.Lock()
 	defer m.smux.Unlock()
 
-	if s, ok := m.sockets[sid]; ok && m.conn.Listening() {
+	if s, ok := m.sockets[sid]; ok {
 		s.Send(msg)
 		return nil
 	}
 
-	// This can happen occasionally on disconnect. Probably a race condition in
-	// the parent process.
+	if msg[len(msg)-7:] == "|deinit" {
+		// This happens on user-initiated disconnect. Mitigate until this
+		// race condition is fixed.
+		return nil
+	}
+
 	return fmt.Errorf("Sockets: attempted to send to non-existent socket of ID %v: %v", sid, msg)
 }
 
@@ -218,7 +222,8 @@ func (m *Multiplexer) channelRemove(cid string, sid string) error {
 			return fmt.Errorf("Sockets: failed to remove nonexistent socket of ID %v from channel %v", sid, cid)
 		}
 	} else {
-		// This occasionally happens on user disconnect.
+		// This happens on user-initiated disconnect. Mitigate until this race
+		// condition is fixed.
 		return nil
 	}
 
@@ -236,7 +241,8 @@ func (m *Multiplexer) channelBroadcast(cid string, msg string) error {
 
 	c, ok := m.channels[cid]
 	if !ok {
-		// This happens occasionally when the last user leaves a room. Mitigate
+		// This happens occasionally when the sole user in a room leaves.
+		// Mitigate until this race condition is fixed.
 		return nil
 	}
 
@@ -314,19 +320,18 @@ func (m *Multiplexer) subchannelBroadcast(cid string, msg string) error {
 func (m *Multiplexer) Handler(s sockjs.Session) {
 	sid := m.socketAdd(s)
 	for {
-		if msg, err := s.Recv(); err == nil {
-			if err = m.socketReceive(sid, msg); err != nil {
-				// Likely a SockJS glitch if this happens at all.
-				fmt.Printf("%v\n", err)
-				break
-			}
-			continue
+		msg, err := s.Recv()
+		if err != nil {
+			fmt.Printf("Sockets: SockJS error on message receive for socket of ID %v: %v", sid, err)
+			break
 		}
-		break
+		if err = m.socketReceive(sid, msg); err != nil {
+			fmt.Printf("%v\n", err)
+			break
+		}
 	}
 
 	if err := m.socketRemove(sid, false); err != nil {
-		// Socket was already removed by a message from the parent process.
 		fmt.Printf("%v\n", err)
 	}
 }

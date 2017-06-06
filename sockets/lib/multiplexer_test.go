@@ -15,31 +15,46 @@ func TestMultiplexer(t *testing.T) {
 	mux := NewMultiplexer()
 	mux.Listen(conn)
 
-	t.Run("*Multiplexer.socketAdd", func(t *testing.T) {
-		sid := mux.socketAdd(testSocket{})
+	ts := testSocket{}
+	t.Run("socketAdd", func(t *testing.T) {
+		sid := mux.socketAdd(ts)
 		if len(mux.sockets) != 1 {
 			t.Errorf("Sockets: expected sockets length to be %v, but is actually %v", 1, len(mux.sockets))
 		}
-		mux.socketRemove(sid, true)
+		delete((*mux).sockets, sid)
 	})
-	t.Run("*Multiplexer.socketRemove", func(t *testing.T) {
-		sid := mux.socketAdd(testSocket{})
+	t.Run("socketRemove", func(t *testing.T) {
+		sid := mux.socketAdd(ts)
 		if err := mux.socketRemove(sid, true); err != nil {
 			t.Errorf("%v", err)
 		}
 		if len(mux.sockets) != 0 {
 			t.Errorf("Sockets: expected sockets length to be %v, but is actually %v", 0, len(mux.sockets))
 		}
-		sid = mux.socketAdd(testSocket{})
+		if err := mux.socketRemove(sid, true); err == nil {
+			t.Errorf("Sockets: did not remove socket of ID %v on socket remove", sid)
+		}
+
+		sid = mux.socketAdd(ts)
 		if err := mux.socketRemove(sid, false); err != nil {
 			t.Errorf("%v", err)
 		}
-		if len(mux.sockets) != 0 {
-			t.Errorf("Sockets: expected sockets length to be %v, but is actually %v", 0, len(mux.sockets))
+		if err := mux.socketRemove(sid, false); err == nil {
+			t.Errorf("Sockets: did not remove socket of ID %v on socket remove", sid)
 		}
 	})
-	t.Run("*Multiplexer.channelAdd", func(t *testing.T) {
-		sid := mux.socketAdd(testSocket{})
+	t.Run("socketSend", func(t *testing.T) {
+		sid := mux.socketAdd(ts)
+		if err := mux.socketSend(sid, ">global\n|ayy lmao"); err != nil {
+			t.Errorf("%v", err)
+		}
+		mux.socketRemove(sid, true)
+		if err := mux.socketSend(sid, ">global\n|deinit"); err != nil {
+			t.Errorf("%v", err)
+		}
+	})
+	t.Run("channelAdd", func(t *testing.T) {
+		sid := mux.socketAdd(ts)
 		cid := "global"
 		if err := mux.channelAdd(cid, sid); err != nil {
 			t.Errorf("%v", err)
@@ -53,8 +68,8 @@ func TestMultiplexer(t *testing.T) {
 		mux.channelRemove(cid, sid)
 		mux.socketRemove(sid, true)
 	})
-	t.Run("*Multiplexer.channelRemove", func(t *testing.T) {
-		sid := mux.socketAdd(testSocket{})
+	t.Run("channelRemove", func(t *testing.T) {
+		sid := mux.socketAdd(ts)
 		cid := "global"
 		mux.channelAdd(cid, sid)
 		if err := mux.channelRemove(cid, sid); err != nil {
@@ -68,8 +83,8 @@ func TestMultiplexer(t *testing.T) {
 		}
 		mux.socketRemove(sid, true)
 	})
-	t.Run("*Multiplexer.channelBroadcast", func(t *testing.T) {
-		sid := mux.socketAdd(testSocket{})
+	t.Run("channelBroadcast", func(t *testing.T) {
+		sid := mux.socketAdd(ts)
 		cid := "global"
 		mux.channelAdd(cid, sid)
 		if err := mux.channelBroadcast(cid, "|raw|ayy lmao"); err != nil {
@@ -81,8 +96,8 @@ func TestMultiplexer(t *testing.T) {
 		}
 		mux.socketRemove(sid, true)
 	})
-	t.Run("*Multiplexer.subchannelMove", func(t *testing.T) {
-		sid := mux.socketAdd(testSocket{})
+	t.Run("subchannelMove", func(t *testing.T) {
+		sid := mux.socketAdd(ts)
 		cid := "global"
 		mux.channelAdd(cid, sid)
 		if err := mux.subchannelMove(cid, P1_SUBCHANNEL_ID, sid); err != nil {
@@ -94,7 +109,7 @@ func TestMultiplexer(t *testing.T) {
 		mux.channelRemove(cid, sid)
 		mux.socketRemove(sid, true)
 	})
-	t.Run("*Multiplexer.subchannelBroadcast", func(t *testing.T) {
+	t.Run("subchannelBroadcast", func(t *testing.T) {
 		msg := "|split\n0\n1\n2\n|\n|split\n3\n4\n5\n|"
 		scids := []byte{DEFAULT_SUBCHANNEL_ID, P1_SUBCHANNEL_ID, P2_SUBCHANNEL_ID}
 		for idx, scid := range scids {
@@ -104,7 +119,7 @@ func TestMultiplexer(t *testing.T) {
 			}
 		}
 
-		sid := mux.socketAdd(testSocket{})
+		sid := mux.socketAdd(ts)
 		cid := "global"
 		mux.channelAdd(cid, sid)
 		mux.subchannelMove(cid, P1_SUBCHANNEL_ID, sid)
