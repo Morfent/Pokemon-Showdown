@@ -527,15 +527,10 @@ if (cluster.isWorker) {
 
 	server.installHandlers(app, {});
 	app.listen(Config.port, Config.bindaddress);
-	console.log(`Worker ${cluster.worker.id} now listening on ${Config.bindaddress}:${Config.port}`);
-
 	if (appssl) {
 		server.installHandlers(appssl, {});
 		appssl.listen(Config.ssl.port, Config.bindaddress);
-		console.log(`Worker ${cluster.worker.id} now listening for SSL on port ${Config.ssl.port}`);
 	}
-
-	console.log(`Test your server at http://${Config.bindaddress === '0.0.0.0' ? 'localhost' : Config.bindaddress}:${Config.port}`);
 
 	require('./repl').start(
 		'sockets-',

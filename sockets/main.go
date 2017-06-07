@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -77,11 +76,6 @@ func main() {
 
 	// Begin serving over HTTP.
 	go func(ba string, port string) {
-		srv := &http.Server{
-			Handler: r,
-			Addr:    ba + port,
-		}
-
 		addr, err := net.ResolveTCPAddr("tcp4", ba+port)
 		if err != nil {
 			log.Fatalf("Sockets: failed to resolve the TCP address of the parent's server: %v", err)
@@ -90,20 +84,11 @@ func main() {
 		ln, err := net.ListenTCP("tcp4", addr)
 		defer ln.Close()
 		if err != nil {
-			log.Fatalf("Sockets: failed to listen on %v over HTTP", srv.Addr)
+			log.Fatalf("Sockets: failed to listen over HTTP: %v", err)
 		}
 
-		fmt.Printf("Go workers now listening on %v%v\n", ba, port)
-
-		if ba == "0.0.0.0" {
-			fmt.Printf("Test your server at http://localhost%v/\n", port)
-		} else {
-			fmt.Printf("Test your server at http://%v%v/\n", ba, port)
-		}
-
-		if err = http.Serve(ln, r); err != nil {
-			log.Fatalf("Sockets: HTTP server failed with error: %v", err)
-		}
+		err = http.Serve(ln, r)
+		log.Fatalf("Sockets: HTTP server failed: %v", err)
 	}(config.BindAddress, config.Port)
 
 	// Begin serving over HTTPS if configured to do so.
@@ -124,14 +109,11 @@ func main() {
 			ln, err = tls.Listen("tcp4", srv.Addr, srv.TLSConfig)
 			defer ln.Close()
 			if err != nil {
-				log.Fatalf("Sockets: failed to listen on %v over HTTPS", srv.Addr)
+				log.Fatalf("Sockets: failed to listen over HTTPS: %v", err)
 			}
 
-			fmt.Printf("Go workers now listening for SSL on port %v\n", port)
-
-			if err := http.Serve(ln, r); err != nil {
-				log.Fatalf("Sockets: HTTPS server failed: %v", err)
-			}
+			err = http.Serve(ln, r)
+			log.Fatalf("Sockets: HTTPS server failed: %v", err)
 		}(config.BindAddress, config.SSL.Port, config.SSL.Options.Cert, config.SSL.Options.Key)
 	}
 
