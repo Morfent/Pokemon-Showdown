@@ -430,18 +430,24 @@ if (cluster.isWorker) {
 
 	let app = require('http').createServer();
 	let appssl = null;
-	if (Config.ssl) {
+	if (Config.ssl && Config.ssl.port && Config.ssl.options) {
+		if (Config.ssl.options.key instanceof Buffer || Config.ssl.options.cert instanceof Buffer) {
+			throw new Error('Sockets: SSL config must use absolute pathnames to SSL key and certificate files, not buffers of their contents!');
+		}
+
+		// Yes, this is intended to throw if this fails.
 		let key;
-		let cert;
 		try {
 			key = fs.readFileSync(Config.ssl.options.key);
+		} catch (e) {}
+
+		let cert;
+		try {
 			cert = fs.readFileSync(Config.ssl.options.cert);
-			Config.ssl.options.key = key;
-			Config.ssl.options.cert = cert;
-		} catch (e) {
-			console.error('The configured SSL key and cert must be the filenames of their according files now in order for Go processes to be able to host over HTTPS.');
-		} finally {
-			appssl = require('https').createServer(Config.ssl.options);
+		} catch (e) {}
+
+		if (key && cert) {
+			appssl = require('https').createServer({key, cert});
 		}
 	}
 
