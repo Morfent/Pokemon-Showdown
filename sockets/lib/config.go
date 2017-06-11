@@ -14,21 +14,21 @@ import (
 	"os"
 )
 
-type config struct {
-	Workers     int     `json:"workers"`     // Number of workers for the master to spawn.
-	Port        string  `json:"port"`        // HTTP server port.
-	BindAddress string  `json:"bindAddress"` // HTTP/HTTPS server(s) hostname.
-	SSL         sslOpts `json:"ssl"`         // HTTPS config settings.
-}
-
-type sslOpts struct {
-	Port    string  `json:"port"`    // HTTPS server port.
-	Options sslKeys `json:"options"` // SSL config settings.
-}
-
-type sslKeys struct {
+type sslcert struct {
 	Cert string `json:"cert"` // Path to the SSL certificate.
 	Key  string `json:"key"`  // Path to the SSL key.
+}
+
+type sslconf struct {
+	Port    string  `json:"port"`              // HTTPS server port.
+	Options sslcert `json:"options,omitempty"` // SSL config settings.
+}
+
+type config struct {
+	Workers     int     `json:"workers"`       // Number of workers for the master to spawn.
+	Port        string  `json:"port"`          // HTTP server port.
+	BindAddress string  `json:"bindAddress"`   // HTTP/HTTPS server(s) hostname.
+	SSL         sslconf `json:"ssl,omitempty"` // HTTPS config settings.
 }
 
 func NewConfig(envVar string) (c config, err error) {

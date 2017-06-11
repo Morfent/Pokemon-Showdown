@@ -107,11 +107,11 @@ func main() {
 
 			var ln net.Listener
 			ln, err = tls.Listen("tcp4", srv.Addr, srv.TLSConfig)
-			defer ln.Close()
 			if err != nil {
 				log.Fatalf("Sockets: failed to listen over HTTPS: %v", err)
 			}
 
+			defer ln.Close()
 			err = http.Serve(ln, r)
 			log.Fatalf("Sockets: HTTPS server failed: %v", err)
 		}(config.BindAddress, config.SSL.Port, config.SSL.Options.Cert, config.SSL.Options.Key)

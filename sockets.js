@@ -341,7 +341,7 @@ class GoWorker extends EventEmitter {
 						workers: Config.workers || 1,
 						port: `:${Config.port || 8000}`,
 						bindAddress: Config.bindaddress || '0.0.0.0',
-						ssl: Config.ssl || null,
+						ssl: Config.ssl ? Object.assign({}, Config.ssl, {port: `:${Config.ssl.port}`}) : null,
 					}),
 				},
 				stdio: ['inherit', 'inherit', 'pipe'],
