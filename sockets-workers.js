@@ -36,24 +36,26 @@ const P2_SUBCHANNEL_ID = '2';
 const SUBCHANNEL_MESSAGE_REGEX = /\|split\n([^\n]*)\n([^\n]*)\n([^\n]*)\n[^\n]*/g;
 
 /**
- * @class Multiplexer
- * @description Manages the worker's state for sockets, channels, and
+ * Manages the worker's state for sockets, channels, and
  * subchannels. This is responsible for parsing all outgoing and incoming
  * messages.
+ *
+ * @class Multiplexer
+ * @property {number} socketCounter
+ * @property {Map<string, any>} sockets
+ * @property {Map<string, Map<string, string>>} channels
+ * @property {any} cleanupInterval // replace with NodeJS.Timer
  */
 class Multiplexer {
 	constructor() {
-		/** @type {number} */
 		this.socketCounter = 0;
-		/** @type {Map<string, any>} */
 		this.sockets = new Map();
-		/** @type {Map<string, Map<string, string>>} */
 		this.channels = new Map();
 		this.cleanupInterval = setInterval(() => this.sweepClosedSockets(), 10 * 60 * 1000);
 	}
 
 	/**
-	 * @description Mitigates a potential bug in SockJS or Faye-Websocket where
+	 * Mitigates a potential bug in SockJS or Faye-Websocket where
 	 * sockets fail to emit a 'close' event after having disconnected.
 	 */
 	sweepClosedSockets() {
@@ -82,7 +84,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sends an IPC message to the parent process.
+	 * Sends an IPC message to the parent process.
 	 * @param {string} token
 	 * @param {string[]} params
 	 */
@@ -92,7 +94,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Parses the params in a downstream message sent as a
+	 * Parses the params in a downstream message sent as a
 	 * command.
 	 * @param {string} params
 	 * @param {number} count
@@ -127,7 +129,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Parses downstream messages.
+	 * Parses downstream messages.
 	 * @param {string} data
 	 * @return {boolean}
 	 */
@@ -161,11 +163,14 @@ class Multiplexer {
 		case SUBCHANNEL_BROADCAST:
 			[channelid, message] = this.parseParams(params, 2);
 			return this.onSubchannelBroadcast(channelid, message);
+		default:
+			// Ignore.
+			return false;
 		}
 	}
 
 	/**
-	 * @description Safely tries to destroy a socket's connection.
+	 * Safely tries to destroy a socket's connection.
 	 * @param {any} socket
 	 */
 	tryDestroySocket(socket) {
@@ -176,7 +181,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Eval handler for downstream messages.
+	 * Eval handler for downstream messages.
 	 * @param {string} expr
 	 * @return {boolean}
 	 */
@@ -189,7 +194,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sockets.socketConnect message handler.
+	 * Sockets.socketConnect message handler.
 	 * @param {any} socket
 	 * @return {boolean}
 	 */
@@ -206,12 +211,9 @@ class Multiplexer {
 		this.sockets.set(socketid, socket);
 		this.sendUpstream(SOCKET_CONNECT, socketid, ip, ips, socket.protocol);
 
-		socket.on('data',
-			/** @param {string} message */
-			message => {
-				this.onSocketReceive(socketid, message);
-			}
-		);
+		socket.on('data', /** @param {string} message */ message => {
+			this.onSocketReceive(socketid, message);
+		});
 
 		socket.on('close', () => {
 			this.sendUpstream(SOCKET_DISCONNECT, socketid);
@@ -227,7 +229,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sockets.socketDisconnect message handler.
+	 * Sockets.socketDisconnect message handler.
 	 * @param {string} socketid
 	 * @return {boolean}
 	 */
@@ -240,7 +242,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sockets.socketSend message handler.
+	 * Sockets.socketSend message handler.
 	 * @param {string} socketid
 	 * @param {string} message
 	 * @return {boolean}
@@ -254,7 +256,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description onmessage event handler for sockets. Passes the message
+	 * onmessage event handler for sockets. Passes the message
 	 * upstream.
 	 * @param {string} socketid
 	 * @param {string} message
@@ -282,7 +284,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sockets.channelAdd message handler.
+	 * Sockets.channelAdd message handler.
 	 * @param {string} channelid
 	 * @param {string} socketid
 	 * @return {boolean}
@@ -303,7 +305,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sockets.channelRemove message handler.
+	 * Sockets.channelRemove message handler.
 	 * @param {string} channelid
 	 * @param {string} socketid
 	 * @return {boolean}
@@ -318,7 +320,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sockets.channelSend and Sockets.channelBroadcast message
+	 * Sockets.channelSend and Sockets.channelBroadcast message
 	 * handler.
 	 * @param {string} channelid
 	 * @param {string} message
@@ -329,8 +331,10 @@ class Multiplexer {
 		if (!channel) return false;
 
 		channel.forEach(
-			/** @param {string} subchannelid */
-			/** @param {string} socketid */
+			/**
+			 * @param {string} subchannelid
+			 * @param {string} socketid
+			 */
 			(subchannelid, socketid) => {
 				let socket = this.sockets.get(socketid);
 				socket.write(message);
@@ -341,7 +345,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sockets.subchannelMove message handler.
+	 * Sockets.subchannelMove message handler.
 	 * @param {string} channelid
 	 * @param {string} subchannelid
 	 * @param {string} socketid
@@ -362,7 +366,7 @@ class Multiplexer {
 	}
 
 	/**
-	 * @description Sockets.subchannelBroadcast message handler.
+	 * Sockets.subchannelBroadcast message handler.
 	 * @param {string} channelid
 	 * @param {string} message
 	 * @return {boolean}
@@ -373,8 +377,10 @@ class Multiplexer {
 
 		let msgs = {};
 		channel.forEach(
-			/** @param {string} subchannelid */
-			/** @param {string} socketid */
+			/**
+			 * @param {string} subchannelid
+			 * @param {string} socketid
+			 */
 			(subchannelid, socketid) => {
 				let socket = this.sockets.get(socketid);
 				if (!socket) return;
@@ -405,7 +411,7 @@ if (cluster.isWorker) {
 	const sockjs = require('sockjs');
 	const StaticServer = require('node-static').Server;
 
-	/** @type {any} */
+	// @ts-ignore
 	global.Config = require('./config/config');
 
 	if (process.env.PSPORT) Config.port = +process.env.PSPORT;
@@ -413,14 +419,11 @@ if (cluster.isWorker) {
 	if (+process.env.PSNOSSL) Config.ssl = null;
 
 	// Graceful crash.
-	process.on('uncaughtException',
-		/** @param {Error} err */
-		err => {
-			if (Config.crashguard) {
-				require('./crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`, true);
-			}
+	process.on('uncaughtException', /** @param {Error} err */ err => {
+		if (Config.crashguard) {
+			require('./crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`, true);
 		}
-	);
+	});
 
 	// This is optional. If ofe is installed, it will take a heapdump if the
 	// process runs out of memory.
@@ -436,29 +439,21 @@ if (cluster.isWorker) {
 		}
 
 		// Yes, this is intended to throw if this fails.
-		let key;
-		try {
-			key = fs.readFileSync(Config.ssl.options.key);
-		} catch (e) {}
-
-		let cert;
-		try {
-			cert = fs.readFileSync(Config.ssl.options.cert);
-		} catch (e) {}
-
-		if (key && cert) {
-			appssl = require('https').createServer({key, cert});
-		}
+		let key = fs.readFileSync(Config.ssl.options.key);
+		let cert = fs.readFileSync(Config.ssl.options.cert);
+		if (key && cert) appssl = require('https').createServer({key, cert});
 	}
 
 	// Launch the static server.
 	try {
-		let cssserver = new StaticServer('./config');
-		let avatarserver = new StaticServer('./config/avatars');
-		let staticserver = new StaticServer('./static');
-		/** @param {any} request */
-		/** @param {any} response */
-		let staticRequestHandler = (request, response) => {
+		const cssserver = new StaticServer('./config');
+		const avatarserver = new StaticServer('./config/avatars');
+		const staticserver = new StaticServer('./static');
+		/**
+		 * @param {any} request
+		 * @param {any} response
+		 */
+		const staticRequestHandler = (request, response) => {
 			// console.log("static rq: " + request.socket.remoteAddress + ":" + request.socket.remotePort + " -> " + request.socket.localAddress + ":" + request.socket.localPort + " - " + request.method + " " + request.url + " " + request.httpVersion + " - " + request.rawHeaders.join('|'));
 			request.resume();
 			request.addListener('end', () => {
@@ -480,15 +475,17 @@ if (cluster.isWorker) {
 					server = staticserver;
 				}
 
-				server.serve(request, response,
-					/** @param {any} e */
-					/** @param {any} res */
-					(e, res) => {
-						if (e && (e.status === 404)) {
-							staticserver.serveFile('404.html', 404, {}, request, response);
-						}
+				/**
+				 * @param {any} e
+				 * @param {any} res
+				 */
+				const notFoundCallback = (e, res) => {
+					if (e && (e.status === 404)) {
+						staticserver.serveFile('404.html', 404, {}, request, response);
 					}
-				);
+				};
+
+				server.serve(request, response, notFoundCallback);
 			});
 		};
 
@@ -499,9 +496,11 @@ if (cluster.isWorker) {
 	// Launch the SockJS server.
 	const server = sockjs.createServer({
 		sockjs_url: '//play.pokemonshowdown.com/js/lib/sockjs-1.1.1-nwjsfix.min.js',
-		/** @param {string} severity */
-		/** @param {string} message */
-		log: (severity, message) => {
+		/**
+		 * @param {string} severity
+		 * @param {string} message
+		 */
+		log(severity, message) {
 			if (severity === 'error') console.error(`Sockets worker SockJS error: ${message}`);
 		},
 		prefix: '/showdown',
@@ -513,23 +512,17 @@ if (cluster.isWorker) {
 	// messages upstream.
 	const multiplexer = new Multiplexer();
 
-	process.on('message',
-		/** @param {string} data */
-		data => {
-			multiplexer.receiveDownstream(data);
-		}
-	);
+	process.on('message', /** @param {string} data */ data => {
+		multiplexer.receiveDownstream(data);
+	});
 
 	process.on('disconnect', () => {
 		process.exit(0);
 	});
 
-	server.on('connection',
-		/** @param {any} socket */
-		socket => {
-			multiplexer.onSocketConnect(socket);
-		}
-	);
+	server.on('connection', /** @param {any} socket */ socket => {
+		multiplexer.onSocketConnect(socket);
+	});
 
 	server.installHandlers(app, {});
 	app.listen(Config.port, Config.bindaddress);
@@ -539,8 +532,7 @@ if (cluster.isWorker) {
 	}
 
 	require('./repl').start(
-		'sockets-',
-		`${cluster.worker.id}-${process.pid}`,
+		`sockets-${cluster.worker.id}-${process.pid}`,
 		/** @param {string} cmd */
 		cmd => eval(cmd)
 	);

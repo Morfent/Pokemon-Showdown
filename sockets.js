@@ -22,7 +22,7 @@ if (cluster.isMaster) {
 }
 
 /**
- * @description IPC delimiter byte. This byte must stringify as a hexadeimal
+ * IPC delimiter byte. This byte must stringify as a hexadeimal
  * escape code when stringified as JSON to prevent messages from being able to
  * contain the byte itself.
  * @type {string}
@@ -30,12 +30,16 @@ if (cluster.isMaster) {
 const DELIM = '\x03';
 
 /**
- * @class WorkerWrapper
- * @description A wrapper class for native Node.js Worker and GoWorker
+ * A wrapper class for native Node.js Worker and GoWorker
  * instances. This parses upstream messages from both types of workers and
  * cleans up when workers crash or get killed before respawning them. In other
  * words this listens for events emitted from both types of workers and handles
  * them accordingly.
+ *
+ * @class WorkerWrapper
+ * @property {any} worker
+ * @property {number} id
+ * @property {(ip: string) => boolean} isTrustedProxyIp
  */
 class WorkerWrapper {
 	/**
@@ -48,21 +52,15 @@ class WorkerWrapper {
 		this.isTrustedProxyIp = Dnsbl.checker(Config.proxyip);
 
 		worker.once('listening', () => this.onListen());
-		worker.on('message',
-			/** @param {string} data */
-			data => this.onMessage(data)
-		);
+		worker.on('message', /** @param {string} data */ data => this.onMessage(data));
 		worker.on('error', () => {
 			// Handle on disconnect.
 		});
-		worker.once('disconnect',
-			/** @param {Error=} err */
-			err => this.onDisconnect(err)
-		);
+		worker.once('disconnect', /** @param {Error=} err */ err => this.onDisconnect(err));
 	}
 
 	/**
-	 * @description Worker process getter
+	 * Worker process getter
 	 * @return {any}
 	 */
 	get process() {
@@ -70,7 +68,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Worker exitedAfterDisconnect getter
+	 * Worker exitedAfterDisconnect getter
 	 * @return {boolean | void}
 	 */
 	get exitedAfterDisconnect() {
@@ -78,7 +76,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Worker suicide getter
+	 * Worker suicide getter
 	 * @return {boolean | void}
 	 */
 	get suicide() {
@@ -86,7 +84,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Worker#kill wrapper
+	 * Worker#kill wrapper
 	 * @param {string=} signal
 	 */
 	kill(signal) {
@@ -94,7 +92,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Worker#destroy wrapper
+	 * Worker#destroy wrapper
 	 * @param {string=} signal
 	 */
 	destroy(signal) {
@@ -102,7 +100,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Worker#send wrapper
+	 * Worker#send wrapper
 	 * @param {string} message
 	 * @return {boolean}
 	 */
@@ -111,7 +109,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Worker#isConnected wrapper
+	 * Worker#isConnected wrapper
 	 * @return {boolean}
 	 */
 	isConnected() {
@@ -119,7 +117,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Worker#isDead wrapper
+	 * Worker#isDead wrapper
 	 * @return {boolean}
 	 */
 	isDead() {
@@ -127,7 +125,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Splits the parametres of incoming IPC messages from the
+	 * Splits the parametres of incoming IPC messages from the
 	 * worker's child process for the 'message' event handler.
 	 * @param {string} params
 	 * @param {number} count
@@ -162,10 +160,10 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Picks the last known IP for a new connection that's found
+	 * Picks the last known IP for a new connection that's found
 	 * to not be trusted as per the DNSBL.
 	 * @param {string} ip
-	 * @param {string} header
+	 * @param {string} [header = '']
 	 * @return {string}
 	 */
 	pluckUntrustedIp(ip, header = '') {
@@ -186,7 +184,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description 'listening' event handler for the worker. Logs which
+	 * 'listening' event handler for the worker. Logs which
 	 * hostname and worker ID is listening to console.
 	 */
 	onListen() {
@@ -198,11 +196,10 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description 'message' event handler for the worker. Parses which type
+	 * 'message' event handler for the worker. Parses which type
 	 * of command the incoming IPC message uses, then parses its parametres and
 	 * calls the appropriate Users method.
 	 * @param {string} data
-	 * @return {boolean}
 	 */
 	onMessage(data) {
 		// console.log('master received: ' + data);
@@ -224,7 +221,7 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * @description Worker 'disconnect' event handler.
+	 * Worker 'disconnect' event handler.
 	 * @param {Error=} err
 	 */
 	onDisconnect(err) {
@@ -237,15 +234,25 @@ class WorkerWrapper {
 }
 
 /**
- * @class GoWorker
- * @extends NodeJS.EventEmitter
- * @description A mock Worker class for Go child processes. Similarly to
+ * A mock Worker class for Go child processes. Similarly to
  * Node.js workers, it uses a TCP net server to perform IPC. After launching
  * the server, it will spawn the Go child process and wait for it to make a
  * connection to the worker's server before performing IPC with it.
+ *
+ * @class GoWorker
+ * @extends NodeJS.EventEmitter
+ * @property {number} id
+ * @property {boolean | void} exitedAfterDisconnect
+ * @property {string[]} buffer
+ * @property {Error | void} error
+ * @property {any} process
+ * @property {any} connection
+ * @property {any} server
  */
 class GoWorker extends EventEmitter {
-	/** @param {number} id */
+	/**
+	 * @param {number} id
+	 */
 	constructor(id) {
 		super();
 
@@ -254,7 +261,6 @@ class GoWorker extends EventEmitter {
 
 		/** @type {string[]} */
 		this.buffer = [];
-		/** @type {Error | void} */
 		this.error = undefined;
 
 		this.process = null;
@@ -267,8 +273,8 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * @description Worker#kill mock
-	 * @param {string} signal
+	 * Worker#kill mock
+	 * @param {string} [signal = 'SIGTERM']
 	 */
 	kill(signal = 'SIGTERM') {
 		if (this.connection) this.connection.destroy();
@@ -277,7 +283,7 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * @description Worker#destroy mock
+	 * Worker#destroy mock
 	 * @param {string=} signal
 	 */
 	destroy(signal) {
@@ -285,7 +291,7 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * @description Worker#send mock
+	 * Worker#send mock
 	 * @param {string} message
 	 * @return {boolean}
 	 */
@@ -305,7 +311,7 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * @description Worker#isConnected mock
+	 * Worker#isConnected mock
 	 * @return {boolean}
 	 */
 	isConnected() {
@@ -313,7 +319,7 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * @description Worker#isDead mock
+	 * Worker#isDead mock
 	 * @return {boolean}
 	 */
 	isDead() {
@@ -321,7 +327,7 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * @description Spawns the Go child process. Once the process has started,
+	 * Spawns the Go child process. Once the process has started,
 	 * it will make a connection to the worker's TCP server.
 	 */
 	spawnChild() {
@@ -343,6 +349,7 @@ class GoWorker extends EventEmitter {
 		);
 
 		this.process.once('exit', () => {
+			// @ts-ignore
 			if (this.server._eventsCount <= 2) {
 				// The child process died before ever opening the IPC
 				// connection and sending any messages over it. Let's avoid
@@ -362,7 +369,7 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * @description 'connection' event handler for the TCP server. Begins
+	 * 'connection' event handler for the TCP server. Begins
 	 * the parsing of incoming IPC messages.
 	 * @param {any} connection
 	 */
@@ -385,27 +392,27 @@ class GoWorker extends EventEmitter {
 }
 
 /**
- * @description Map of worker IDs to workers.
+ * Map of worker IDs to workers.
  * @type {Map<number, WorkerWrapper>}
  */
 const workers = new Map();
 
 /**
- * @description Worker ID counter. We don't use cluster's internal counter so
+ * Worker ID counter. We don't use cluster's internal counter so
  * Config.golang can be freely changed while the server is still running.
  * @type {number}
  */
 let nextWorkerid = 1;
 
 /**
- * @description Config.golang cache. Checked when spawning new workers to
+ * Config.golang cache. Checked when spawning new workers to
  * ensure that Node and Go workers will not try to run at the same time.
  * @type {boolean}
  */
 let golangCache = !!Config.golang;
 
 /**
- * @description Spawns a new worker.
+ * Spawns a new worker.
  * @return {WorkerWrapper}
  */
 function spawnWorker() {
@@ -450,7 +457,7 @@ function spawnWorker() {
 }
 
 /**
- * @description Initializes the configured number of worker processes.
+ * Initializes the configured number of worker processes.
  * @param {any} port
  * @param {any} bindAddress
  * @param {any} workerCount
@@ -490,7 +497,7 @@ function listen(port, bindAddress, workerCount) {
 }
 
 /**
- * @description Kills a worker process using the given worker object.
+ * Kills a worker process using the given worker object.
  * @param {WorkerWrapper} worker
  * @return {number}
  */
@@ -504,7 +511,7 @@ function killWorker(worker) {
 }
 
 /**
- * @description Kills a worker process using the given worker PID.
+ * Kills a worker process using the given worker PID.
  * @param {number} pid
  * @return {number | false}
  */
@@ -518,7 +525,7 @@ function killPid(pid) {
 }
 
 /**
- * @description Sends a message to a socket in a given worker by ID.
+ * Sends a message to a socket in a given worker by ID.
  * @param {WorkerWrapper} worker
  * @param {string} socketid
  * @param {string} message
@@ -528,7 +535,7 @@ function socketSend(worker, socketid, message) {
 }
 
 /**
- * @description Forcefully disconnects a socket in a given worker by ID.
+ * Forcefully disconnects a socket in a given worker by ID.
  * @param {WorkerWrapper} worker
  * @param {string} socketid
  */
@@ -537,7 +544,7 @@ function socketDisconnect(worker, socketid) {
 }
 
 /**
- * @description Broadcasts a message to all sockets in a given channel across
+ * Broadcasts a message to all sockets in a given channel across
  * all workers.
  * @param {string} channelid
  * @param {string} message
@@ -549,7 +556,7 @@ function channelBroadcast(channelid, message) {
 }
 
 /**
- * @description Broadcasts a message to all sockets in a given channel and a
+ * Broadcasts a message to all sockets in a given channel and a
  * given worker.
  * @param {WorkerWrapper} worker
  * @param {string} channelid
@@ -560,7 +567,7 @@ function channelSend(worker, channelid, message) {
 }
 
 /**
- * @description Adds a socket to a given channel in a given worker by ID.
+ * Adds a socket to a given channel in a given worker by ID.
  * @param {WorkerWrapper} worker
  * @param {string} channelid
  * @param {string} socketid
@@ -570,7 +577,7 @@ function channelAdd(worker, channelid, socketid) {
 }
 
 /**
- * @description Removes a socket from a given channel in a given worker by ID.
+ * Removes a socket from a given channel in a given worker by ID.
  * @param {WorkerWrapper} worker
  * @param {string} channelid
  * @param {string} socketid
@@ -580,7 +587,7 @@ function channelRemove(worker, channelid, socketid) {
 }
 
 /**
- * @description Broadcasts a message to be demuxed into three separate messages
+ * Broadcasts a message to be demuxed into three separate messages
  * across three subchannels in a given channel across all workers.
  * @param {string} channelid
  * @param {string} message
@@ -592,7 +599,7 @@ function subchannelBroadcast(channelid, message) {
 }
 
 /**
- * @description Moves a given socket to a different subchannel in a channel by
+ * Moves a given socket to a different subchannel in a channel by
  * ID in the given worker.
  * @param {WorkerWrapper} worker
  * @param {string} channelid
