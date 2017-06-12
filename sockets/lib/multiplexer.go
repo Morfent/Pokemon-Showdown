@@ -97,6 +97,8 @@ func (m *Multiplexer) Process(cmd Command) (err error) {
 		cid := params[0]
 		msg := params[1]
 		err = m.subchannelBroadcast(cid, msg)
+	default:
+		err = fmt.Errorf("Sockets: received unknown message of type %v: %v", cmd.Token(), cmd.Message())
 	}
 
 	if err != nil {
