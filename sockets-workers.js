@@ -405,6 +405,19 @@ class Multiplexer {
 
 		return true;
 	}
+
+	/**
+	 * Cleans up the properties of the multiplexer once an internal message
+	 * from the parent process dictates that the worker disconnect. We can't
+	 * use the 'disconnect' handler for this because at that point the worker
+	 * is already disconnected.
+	 */
+	destroy() {
+		clearInterval(this.cleanupInterval);
+		this.sockets.forEach(socket => this.tryDestroySocket(socket));
+		this.sockets.clear();
+		this.channels.clear();
+	}
 }
 
 if (cluster.isWorker) {
@@ -516,8 +529,11 @@ if (cluster.isWorker) {
 		multiplexer.receiveDownstream(data);
 	});
 
-	process.on('disconnect', () => {
-		process.exit(0);
+	process.on('internalMessage', /** @param {{[k: string]: any}} data */ data => {
+		if (data.act === 'disconnect') {
+			multiplexer.destroy();
+			process.exit(0);
+		}
 	});
 
 	server.on('connection', /** @param {any} socket */ socket => {
