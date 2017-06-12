@@ -345,6 +345,8 @@ class GoWorker extends EventEmitter {
 					}),
 				},
 				stdio: ['inherit', 'inherit', 'pipe'],
+				// Prevents this from becoming an orphan process
+				shell: true,
 			}
 		);
 
