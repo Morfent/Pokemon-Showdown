@@ -32,7 +32,7 @@ type Connection struct {
 	listening bool         // Whether or not this is connected and listening for IPC messages.
 }
 
-func NewConnection(envVar string) (c *Connection, err error) {
+func NewConnection(envVar string) (*Connection, error) {
 	port := os.Getenv(envVar)
 	addr, err := net.ResolveTCPAddr("tcp", "localhost"+port)
 	if err != nil {
@@ -47,14 +47,14 @@ func NewConnection(envVar string) (c *Connection, err error) {
 		return nil, fmt.Errorf("Sockets: failed to connect to TCP server: %v", err)
 	}
 
-	c = &Connection{
+	c := &Connection{
 		port:      port,
 		addr:      addr,
 		conn:      conn,
 		listening: false,
 	}
 
-	return
+	return c, nil
 }
 
 func (c *Connection) Listening() bool {
@@ -89,15 +89,15 @@ func (c *Connection) Listen(mux *Multiplexer) {
 }
 
 // Final step in evaluating commands targeted at the IPC connection.
-func (c *Connection) Process(cmd Command) (err error) {
+func (c *Connection) Process(cmd Command) error {
 	// fmt.Printf("Sockets => IPC: %v\n", cmd.Message())
 	if !c.listening {
 		return fmt.Errorf("Sockets: can't process connection commands when the connection isn't listening yet")
 	}
 
 	msg := cmd.Message()
-	_, err = c.Write(msg)
-	return
+	_, err := c.Write(msg)
+	return err
 }
 
 func (c *Connection) Close() error {

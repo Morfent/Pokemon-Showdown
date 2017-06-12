@@ -37,7 +37,7 @@ type Command struct {
 // The multiplexer and the IPC connection both implement this interface. Its
 // purpose is solely to allow the two structs to be used in Command.
 type CommandIO interface {
-	Process(Command) (err error) // Invokes one of its methods using the command's token and parametres.
+	Process(Command) error // Invokes one of its methods using the command's token and parametres.
 }
 
 func getCount(token byte) (count int) {
@@ -48,17 +48,8 @@ func getCount(token byte) (count int) {
 	switch token {
 	case SOCKET_DISCONNECT:
 		count = 1
-	case SOCKET_RECEIVE:
-		count = 2
-	case SOCKET_SEND:
-		count = 2
-	case CHANNEL_ADD:
-		count = 2
-	case CHANNEL_REMOVE:
-		count = 2
-	case CHANNEL_BROADCAST:
-		count = 2
-	case SUBCHANNEL_BROADCAST:
+	case SOCKET_RECEIVE, SOCKET_SEND, CHANNEL_ADD, CHANNEL_REMOVE,
+		CHANNEL_BROADCAST, SUBCHANNEL_BROADCAST:
 		count = 2
 	case SUBCHANNEL_MOVE:
 		count = 3
