@@ -49,9 +49,6 @@ func TestMultiplexer(t *testing.T) {
 			t.Errorf("%v", err)
 		}
 		mux.socketRemove(sid, true)
-		if err := mux.socketSend(sid, ">global\n|deinit"); err != nil {
-			t.Errorf("%v", err)
-		}
 	})
 	t.Run("channelAdd", func(t *testing.T) {
 		sid := mux.socketAdd(ts)

@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/igm/sockjs-go/sockjs"
 )
@@ -108,11 +109,13 @@ func (m *Multiplexer) Process(cmd Command) (err error) {
 }
 
 func (m *Multiplexer) socketAdd(s sockjs.Session) (sid string) {
+	nsid := atomic.LoadUint64(&m.nsid)
+	sid = strconv.FormatUint(nsid, 10)
+	atomic.AddUint64(&m.nsid, 1)
+
 	m.smux.Lock()
 	defer m.smux.Unlock()
 
-	sid = strconv.FormatUint(m.nsid, 10)
-	m.nsid++
 	m.sockets[sid] = s
 
 	if m.conn.Listening() {
@@ -129,9 +132,6 @@ func (m *Multiplexer) socketAdd(s sockjs.Session) (sid string) {
 }
 
 func (m *Multiplexer) socketRemove(sid string, forced bool) error {
-	m.smux.Lock()
-	defer m.smux.Unlock()
-
 	m.cmux.Lock()
 	for cid, c := range m.channels {
 		if _, ok := c[sid]; ok {
@@ -142,6 +142,9 @@ func (m *Multiplexer) socketRemove(sid string, forced bool) error {
 		}
 	}
 	m.cmux.Unlock()
+
+	m.smux.Lock()
+	defer m.smux.Unlock()
 
 	s, ok := m.sockets[sid]
 	if ok {
@@ -185,12 +188,6 @@ func (m *Multiplexer) socketSend(sid string, msg string) error {
 
 	if s, ok := m.sockets[sid]; ok {
 		s.Send(msg)
-		return nil
-	}
-
-	if msg[len(msg)-7:] == "|deinit" {
-		// This happens on user-initiated disconnect. Mitigate until this
-		// race condition is fixed.
 		return nil
 	}
 
