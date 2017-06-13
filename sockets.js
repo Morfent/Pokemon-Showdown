@@ -12,6 +12,7 @@
 
 'use strict';
 
+const child_process = require('child_process');
 const cluster = require('cluster');
 const EventEmitter = require('events');
 
@@ -245,6 +246,7 @@ class WorkerWrapper {
  * @property {boolean | void} exitedAfterDisconnect
  * @property {string[]} buffer
  * @property {Error | void} error
+ * @property {string} GOPATH
  * @property {any} process
  * @property {any} connection
  * @property {any} server
@@ -262,6 +264,9 @@ class GoWorker extends EventEmitter {
 		/** @type {string[]} */
 		this.buffer = [];
 		this.error = undefined;
+
+		this.GOPATH = child_process.execSync('go env GOPATH', {stdio: null, encoding: 'utf8'})
+			.trim().split(require('path').delimiter)[0];
 
 		this.process = null;
 		this.connection = null;
@@ -331,11 +336,9 @@ class GoWorker extends EventEmitter {
 	 * it will make a connection to the worker's TCP server.
 	 */
 	spawnChild() {
-		this.process = require('child_process').spawn(
-			`${process.env.GOPATH}/bin/sockets`, [], {
+		this.process = child_process.spawn(
+			`${this.GOPATH}/bin/sockets`, [], {
 				env: {
-					GOPATH: process.env.GOPATH || '',
-					GOROOT: process.env.GOROOT || '',
 					PS_IPC_PORT: `:${this.server.address().port}`,
 					PS_CONFIG: JSON.stringify({
 						workers: Config.workers || 1,

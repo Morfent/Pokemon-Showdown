@@ -53,11 +53,6 @@ if (config && config.golang) {
 	// first path in the list, so will we.
 	const GOPATH = child_process.execSync('go env GOPATH', {stdio: null, encoding: 'utf8'})
 		.trim().split(path.delimiter)[0];
-	process.env.GOPATH = GOPATH;
-
-	let GOROOT = child_process.execSync('go env GOROOT', {stdio: null, encoding: 'utf8'})
-		.trim().split(path.delimiter)[0];
-	process.env.GOROOT = GOROOT;
 
 	const dependencies = ['github.com/gorilla/mux', 'github.com/igm/sockjs-go/sockjs'];
 	let packages = child_process.execSync('go list all', {stdio: null, encoding: 'utf8'});
