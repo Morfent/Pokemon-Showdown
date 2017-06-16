@@ -134,37 +134,28 @@ class Multiplexer {
 	 * @return {boolean}
 	 */
 	receiveDownstream(data) {
-		let command = data.charAt(0);
+		// console.log(`worker received: ${data}`);
+		let token = data.charAt(0);
 		let params = data.substr(1);
-		let socketid;
-		let channelid;
-		let subchannelid;
-		let message;
-		switch (command) {
+		switch (token) {
 		case EVAL:
 			return this.onEval(params);
 		case SOCKET_DISCONNECT:
 			return this.onSocketDisconnect(params);
 		case SOCKET_SEND:
-			[socketid, message] = this.parseParams(params, 2);
-			return this.onSocketSend(socketid, message);
+			return this.onSocketSend(...this.parseParams(params, 2));
 		case CHANNEL_ADD:
-			[channelid, socketid] = this.parseParams(params, 2);
-			return this.onChannelAdd(channelid, socketid);
+			return this.onChannelAdd(...this.parseParams(params, 2));
 		case CHANNEL_REMOVE:
-			[channelid, socketid] = this.parseParams(params, 2);
-			return this.onChannelRemove(channelid, socketid);
+			return this.onChannelRemove(...this.parseParams(params, 2));
 		case CHANNEL_BROADCAST:
-			[channelid, message] = this.parseParams(params, 2);
-			return this.onChannelBroadcast(channelid, message);
+			return this.onChannelBroadcast(...this.parseParams(params, 2));
 		case SUBCHANNEL_MOVE:
-			[channelid, subchannelid, socketid] = this.parseParams(params, 3);
-			return this.onSubchannelMove(channelid, subchannelid, socketid);
+			return this.onSubchannelMove(...this.parseParams(params, 3));
 		case SUBCHANNEL_BROADCAST:
-			[channelid, message] = this.parseParams(params, 2);
-			return this.onSubchannelBroadcast(channelid, message);
+			return this.onSubchannelBroadcast(...this.parseParams(params, 2));
 		default:
-			// Ignore.
+			console.error(`Sockets: attempted to send unknown IPC message with token ${token}: ${params}`);
 			return false;
 		}
 	}
@@ -243,8 +234,8 @@ class Multiplexer {
 
 	/**
 	 * Sockets.socketSend message handler.
-	 * @param {string} socketid
-	 * @param {string} message
+	 * @param {string} [socketid]
+	 * @param {string} [message]
 	 * @return {boolean}
 	 */
 	onSocketSend(socketid, message) {
@@ -258,8 +249,8 @@ class Multiplexer {
 	/**
 	 * onmessage event handler for sockets. Passes the message
 	 * upstream.
-	 * @param {string} socketid
-	 * @param {string} message
+	 * @param {string} [socketid]
+	 * @param {string} [message]
 	 * @return {boolean}
 	 */
 	onSocketReceive(socketid, message) {
@@ -285,8 +276,8 @@ class Multiplexer {
 
 	/**
 	 * Sockets.channelAdd message handler.
-	 * @param {string} channelid
-	 * @param {string} socketid
+	 * @param {string} [channelid]
+	 * @param {string} [socketid]
 	 * @return {boolean}
 	 */
 	onChannelAdd(channelid, socketid) {
@@ -306,8 +297,8 @@ class Multiplexer {
 
 	/**
 	 * Sockets.channelRemove message handler.
-	 * @param {string} channelid
-	 * @param {string} socketid
+	 * @param {string} [channelid]
+	 * @param {string} [socketid]
 	 * @return {boolean}
 	 */
 	onChannelRemove(channelid, socketid) {
@@ -322,8 +313,8 @@ class Multiplexer {
 	/**
 	 * Sockets.channelSend and Sockets.channelBroadcast message
 	 * handler.
-	 * @param {string} channelid
-	 * @param {string} message
+	 * @param {string} [channelid]
+	 * @param {string} [message]
 	 * @return {boolean}
 	 */
 	onChannelBroadcast(channelid, message) {
@@ -346,9 +337,9 @@ class Multiplexer {
 
 	/**
 	 * Sockets.subchannelMove message handler.
-	 * @param {string} channelid
-	 * @param {string} subchannelid
-	 * @param {string} socketid
+	 * @param {string} [channelid]
+	 * @param {string} [subchannelid]
+	 * @param {string} [socketid]
 	 * @return {boolean}
 	 */
 	onSubchannelMove(channelid, subchannelid, socketid) {
@@ -367,8 +358,8 @@ class Multiplexer {
 
 	/**
 	 * Sockets.subchannelBroadcast message handler.
-	 * @param {string} channelid
-	 * @param {string} message
+	 * @param {string} [channelid]
+	 * @param {string} [message]
 	 * @return {boolean}
 	 */
 	onSubchannelBroadcast(channelid, message) {

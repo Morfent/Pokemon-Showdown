@@ -140,65 +140,6 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * Splits the parametres of incoming IPC messages from the
-	 * worker's child process for the 'message' event handler.
-	 * @param {string} params
-	 * @param {number} count
-	 * @return {string[]}
-	 */
-	parseParams(params, count) {
-		let i = 0;
-		let idx = 0;
-		let ret = [];
-		while (i++ < count) {
-			let newIdx = params.indexOf('\n', idx);
-			if (newIdx < 0) {
-				// No remaining newlines; just use the rest of the string as
-				// the last parametre.
-				ret.push(params.slice(idx));
-				break;
-			}
-
-			let param = params.slice(idx, newIdx);
-			if (i === count) {
-				// We reached the number of parametres needed, but there is
-				// still some remaining string left. Glue it to the last one.
-				param += `\n${params.slice(newIdx + 1)}`;
-			} else {
-				idx = newIdx + 1;
-			}
-
-			ret.push(param);
-		}
-
-		return ret;
-	}
-
-	/**
-	 * Picks the last known IP for a new connection that's found
-	 * to not be trusted as per the DNSBL.
-	 * @param {string} ip
-	 * @param {string} [header = '']
-	 * @return {string}
-	 */
-	pluckUntrustedIp(ip, header = '') {
-		if (!this.isTrustedProxyIp(ip)) {
-			return ip;
-		}
-
-		let ips = header.split(',');
-		let ret;
-		for (let i = ips.length; i--;) {
-			ret = ips[i].trim();
-			if (ret && !this.isTrustedProxyIp(ret)) {
-				return ret;
-			}
-		}
-
-		return ip;
-	}
-
-	/**
 	 * 'listening' event handler for the worker. Logs which
 	 * hostname and worker ID is listening to console.
 	 */
@@ -210,27 +151,68 @@ class WorkerWrapper {
 
 	/**
 	 * 'message' event handler for the worker. Parses which type
-	 * of command the incoming IPC message uses, then parses its parametres and
-	 * calls the appropriate Users method.
+	 * of command the incoming IPC message is calling, then passes its
+	 * parametres to the appropriate method to handle.
 	 * @param {string} data
 	 */
 	onMessage(data) {
-		// console.log('master received: ' + data);
-		let command = data.charAt(0);
+		// console.log(`master received: ${data}`);
+		let token = data.charAt(0);
 		let params = data.substr(1);
-		switch (command) {
+		switch (token) {
 		case '*':
-			let [socketid, ip, header, protocol] = this.parseParams(params, 4);
-			ip = this.pluckUntrustedIp(ip, header);
-			Users.socketConnect(this, this.id, socketid, ip, protocol);
+			this.onSocketConnect(params);
 			break;
 		case '!':
-			Users.socketDisconnect(this, this.id, params);
+			this.onSocketDisconnect(params);
 			break;
 		case '<':
-			Users.socketReceive(this, this.id, ...this.parseParams(params, 2));
+			this.onSocketReceive(params);
+			break;
+		default:
+			console.error(`Sockets: received unknown IPC message with token ${token}: ${params}`);
 			break;
 		}
+	}
+
+	/**
+	 * Socket connection message handler.
+	 * @param {string} params
+	 */
+	onSocketConnect(params) {
+		let [socketid, ip, header, protocol] = params.split('\n');
+
+		if (this.isTrustedProxyIp(ip)) {
+			let ips = header.split(',');
+			for (let i = ips.length; i--;) {
+				let _ip = ips[i].trim();
+				if (_ip && !this.isTrustedProxyIp(_ip)) {
+					ip = _ip;
+					break;
+				}
+			}
+		}
+
+		Users.socketConnect(this, this.id, socketid, ip, protocol);
+	}
+
+	/**
+	 * Socket disconnect handler.
+	 * @param {string} socketid
+	 */
+	onSocketDisconnect(socketid) {
+		Users.socketDisconnect(this, this.id, socketid);
+	}
+
+	/**
+	 * Socket message receive handler.
+	 * @param {string} params
+	 */
+	onSocketReceive(params) {
+		let idx = params.indexOf('\n');
+		let socketid = params.substr(0, idx);
+		let message = params.substr(idx + 1);
+		Users.socketReceive(this, this.id, socketid, message);
 	}
 
 	/**
