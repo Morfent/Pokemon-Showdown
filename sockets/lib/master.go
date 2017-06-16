@@ -16,7 +16,7 @@ package sockets
 
 // A global command channel for the multiplexer and IPC connection to enqueue
 // their new commands to be processed by the workers.
-var CmdQueue = make(chan Command)
+var CmdQueue = make(chan Command, 1000000)
 
 type master struct {
 	wpool chan chan Command // Pool of worker command queues.
