@@ -44,7 +44,7 @@ const SUBCHANNEL_MESSAGE_REGEX = /\|split\n([^\n]*)\n([^\n]*)\n([^\n]*)\n[^\n]*/
  * @property {number} socketCounter
  * @property {Map<string, any>} sockets
  * @property {Map<string, Map<string, string>>} channels
- * @property {any} cleanupInterval // replace with NodeJS.Timer
+ * @property {?NodeJS.Timer} cleanupInterval
  */
 class Multiplexer {
 	constructor() {
@@ -421,9 +421,6 @@ class Multiplexer {
 }
 
 if (cluster.isWorker) {
-	const sockjs = require('sockjs');
-	const StaticServer = require('node-static').Server;
-
 	// @ts-ignore
 	global.Config = require('./config/config');
 
@@ -432,10 +429,8 @@ if (cluster.isWorker) {
 	if (+process.env.PSNOSSL) Config.ssl = null;
 
 	// Graceful crash.
-	process.on('uncaughtException', /** @param {Error} err */ err => {
-		if (Config.crashguard) {
-			require('./crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`, true);
-		}
+	process.on('uncaughtException', err => {
+		if (Config.crashguard) require('./crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`, true);
 	});
 
 	// This is optional. If ofe is installed, it will take a heapdump if the
@@ -445,8 +440,9 @@ if (cluster.isWorker) {
 	} catch (e) {}
 
 	let app = require('http').createServer();
+	/** @type {any} */
 	let appssl = null;
-	if (Config.ssl && Config.ssl.port && Config.ssl.options) {
+	if (Config.ssl) {
 		if (Config.ssl.options.key instanceof Buffer || Config.ssl.options.cert instanceof Buffer) {
 			throw new Error('Sockets: SSL config must use absolute pathnames to SSL key and certificate files, not buffers of their contents!');
 		}
@@ -458,55 +454,56 @@ if (cluster.isWorker) {
 	}
 
 	// Launch the static server.
+	let hasNodeStatic = false;
 	try {
-		const cssserver = new StaticServer('./config');
-		const avatarserver = new StaticServer('./config/avatars');
-		const staticserver = new StaticServer('./static');
+		require.resolve('node-static');
+		hasNodeStatic = true;
+	} catch (e) {}
+
+	if (hasNodeStatic) {
+		const StaticServer = require('node-static').Server;
+		const roomidRegex = /^\/[A-Za-z0-9][A-Za-z0-9-]*\/?$/;
+		const cssServer = new StaticServer('./config');
+		const avatarServer = new StaticServer('./config/avatars');
+		const staticServer = new StaticServer('./static');
 		/**
-		 * @param {any} request
-		 * @param {any} response
+		 * @param {any} req
+		 * @param {any} res
 		 */
-		const staticRequestHandler = (request, response) => {
-			// console.log("static rq: " + request.socket.remoteAddress + ":" + request.socket.remotePort + " -> " + request.socket.localAddress + ":" + request.socket.localPort + " - " + request.method + " " + request.url + " " + request.httpVersion + " - " + request.rawHeaders.join('|'));
-			request.resume();
-			request.addListener('end', () => {
+		const staticRequestHandler = (req, res) => {
+			// console.log(`static rq: ${req.socket.remoteAddress}:${req.socket.remotePort} -> ${req.socket.localAddress}:${req.socket.localPort} - ${req.method} ${req.url} ${request.httpVersion} - ${req.rawHeaders.join('|')}`);
+			req.resume();
+			req.addListener('end', () => {
 				if (Config.customhttpresponse &&
-						Config.customhttpresponse(request, response)) {
+						Config.customhttpresponse(req, res)) {
 					return;
 				}
 
-				let server;
-				if (request.url === '/custom.css') {
-					server = cssserver;
-				} else if (request.url.substr(0, 9) === '/avatars/') {
-					request.url = request.url.substr(8);
-					server = avatarserver;
-				} else {
-					if (/^\/([A-Za-z0-9][A-Za-z0-9-]*)\/?$/.test(request.url)) {
-						request.url = '/';
-					}
-					server = staticserver;
+				let server = staticServer;
+				if (req.url === '/custom.css') {
+					server = cssServer;
+				} else if (req.url.startsWith('/avatars/')) {
+					req.url = req.url.substr(8);
+					server = avatarServer;
+				} else if (roomidRegex.test(req.url)) {
+					req.url = '/';
 				}
 
-				/**
-				 * @param {any} e
-				 * @param {any} res
-				 */
-				const notFoundCallback = (e, res) => {
-					if (e && (e.status === 404)) {
-						staticserver.serveFile('404.html', 404, {}, request, response);
+				server.serve(req, res, e => {
+					// @ts-ignore
+					if (e && e.status === 404) {
+						staticServer.serveFile('404.html', 404, {}, req, res);
 					}
-				};
-
-				server.serve(request, response, notFoundCallback);
+				});
 			});
 		};
 
 		app.on('request', staticRequestHandler);
 		if (appssl) appssl.on('request', staticRequestHandler);
-	} catch (e) {}
+	}
 
 	// Launch the SockJS server.
+	const sockjs = require('sockjs');
 	const server = sockjs.createServer({
 		sockjs_url: '//play.pokemonshowdown.com/js/lib/sockjs-1.1.1-nwjsfix.min.js',
 		/**
@@ -525,15 +522,17 @@ if (cluster.isWorker) {
 	// messages upstream.
 	const multiplexer = new Multiplexer();
 
-	process.on('message', /** @param {string} data */ data => {
+	process.on('message', data => {
 		multiplexer.receiveDownstream(data);
 	});
 
-	process.on('internalMessage', /** @param {{[k: string]: any}} data */ data => {
-		if (data.act === 'disconnect') {
-			multiplexer.destroy();
-			process.exit(0);
-		}
+	// Clean up any remaining connections on disconnect. If this isn't done,
+	// the process will not exit until any remaining connections have been destroyed.
+	// Afterwards, the worker process will die on its own.
+	process.once('disconnect', () => {
+		multiplexer.destroy();
+		app.close();
+		if (appssl) appssl.close();
 	});
 
 	server.on('connection', /** @param {any} socket */ socket => {

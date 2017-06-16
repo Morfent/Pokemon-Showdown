@@ -41,6 +41,7 @@ const DELIM = '\x03';
  * @property {any} worker
  * @property {number} id
  * @property {(ip: string) => boolean} isTrustedProxyIp
+ * @property {?Error} error
  */
 class WorkerWrapper {
 	/**
@@ -51,13 +52,19 @@ class WorkerWrapper {
 		this.worker = worker;
 		this.id = id;
 		this.isTrustedProxyIp = Dnsbl.checker(Config.proxyip);
+		this.error = null;
 
 		worker.once('listening', () => this.onListen());
 		worker.on('message', /** @param {string} data */ data => this.onMessage(data));
-		worker.on('error', () => {
-			// Handle on disconnect.
-		});
-		worker.once('disconnect', /** @param {Error=} err */ err => this.onDisconnect(err));
+		worker.once('error', /** @param {?Error} err */ err => this.onError(err));
+		worker.once('exit',
+			/**
+			 * @param {any} worker
+			 * @param {?number} code
+			 * @param {?string} status
+			 */
+			(worker, code, status) => this.onExit(worker, code, status)
+		);
 	}
 
 	/**
@@ -82,6 +89,13 @@ class WorkerWrapper {
 	 */
 	get suicide() {
 		return this.worker.exitedAfterDisconnect;
+	}
+
+	/**
+	 * Worker#disconnect wrapper
+	 */
+	disconnect() {
+		return this.worker.disconnect();
 	}
 
 	/**
@@ -190,9 +204,7 @@ class WorkerWrapper {
 	 */
 	onListen() {
 		console.log(`Worker ${this.id} now listening on ${Config.bindaddress}:${Config.port}`);
-		if (Config.ssl) {
-			console.log(`Worker ${this.id} now listening for SSL on port ${Config.ssl.port}`);
-		}
+		if (Config.ssl) console.log(`Worker ${this.id} now listening for SSL on port ${Config.ssl.port}`);
 		console.log(`Test your server at http://${Config.bindaddress === '0.0.0.0' ? 'localhost' : Config.bindaddress}:${Config.port}`);
 	}
 
@@ -222,14 +234,36 @@ class WorkerWrapper {
 	}
 
 	/**
-	 * Worker 'disconnect' event handler.
-	 * @param {Error=} err
+	 * Worker 'error' event handler.
+	 * @param {?Error} err
 	 */
-	onDisconnect(err) {
-		if (err) {
-			require('./crashlogger')(new Error(`Worker ${this.id} abruptly died with the following stack trace: ${err.stack}`), 'The main process');
-			console.error(`${Users.socketDisconnectAll(this)} connections were lost.`);
+	onError(err) {
+		this.error = err;
+	}
+
+	/**
+	 * Worker 'exit' event handler.
+	 * @param {any} worker
+	 * @param {?number} code
+	 * @param {?string} signal
+	 */
+	onExit(worker, code, signal) {
+		if (code === null && signal === 'SIGTERM') {
+			// Worker was killed by Sockets.killWorker or Sockets.killPid.
+		} else {
+			// Worker crashed.
+			if (this.error) {
+				require('./crashlogger')(new Error(`Worker ${this.id} abruptly died with the following stack trace: ${this.error.stack}`), 'The main process');
+			} else {
+				require('./crashlogger')(new Error(`Worker ${this.id} abruptly died`), 'The main process');
+			}
+
+			// This could get called during cleanup; prevent it from crashing.
+			this.worker.send = () => false;
+			let count = Users.socketDisconnectAll(this);
+			console.error(`${count} connections were lost.`);
 		}
+
 		spawnWorker();
 	}
 }
@@ -245,8 +279,7 @@ class WorkerWrapper {
  * @property {number} id
  * @property {boolean | void} exitedAfterDisconnect
  * @property {string[]} buffer
- * @property {Error | void} error
- * @property {string} GOPATH
+ * @property {?Error} error
  * @property {any} process
  * @property {any} connection
  * @property {any} server
@@ -263,18 +296,21 @@ class GoWorker extends EventEmitter {
 
 		/** @type {string[]} */
 		this.buffer = [];
-		this.error = undefined;
-
-		this.GOPATH = child_process.execSync('go env GOPATH', {stdio: null, encoding: 'utf8'})
-			.trim().split(require('path').delimiter)[0];
+		this.error = null;
 
 		this.process = null;
 		this.connection = null;
 		this.server = require('net').createServer();
 		this.server.once('connection', connection => this.onChildConnect(connection));
-		this.server.once('close', () => this.emit('disconnect'));
 		this.server.on('error', () => {});
 		this.server.listen(() => process.nextTick(() => this.spawnChild()));
+	}
+
+	/**
+	 * Worker#disconnect mock
+	 */
+	disconnect() {
+		if (this.isConnected()) this.connection.destroy();
 	}
 
 	/**
@@ -282,9 +318,7 @@ class GoWorker extends EventEmitter {
 	 * @param {string} [signal = 'SIGTERM']
 	 */
 	kill(signal = 'SIGTERM') {
-		if (this.connection) this.connection.destroy();
 		if (this.process) this.process.kill(signal);
-		this.server.close();
 	}
 
 	/**
@@ -336,8 +370,11 @@ class GoWorker extends EventEmitter {
 	 * it will make a connection to the worker's TCP server.
 	 */
 	spawnChild() {
+		let GOPATH = child_process.execSync('go env GOPATH', {stdio: null, encoding: 'utf8'})
+			.trim().split(require('path').delimiter)[0];
+
 		this.process = child_process.spawn(
-			`${this.GOPATH}/bin/sockets`, [], {
+			`${GOPATH}/bin/sockets`, [], {
 				env: {
 					PS_IPC_PORT: `:${this.server.address().port}`,
 					PS_CONFIG: JSON.stringify({
@@ -353,24 +390,27 @@ class GoWorker extends EventEmitter {
 			}
 		);
 
-		this.process.once('exit', () => {
-			// @ts-ignore
-			if (this.server._eventsCount <= 2) {
-				// The child process died before ever opening the IPC
-				// connection and sending any messages over it. Let's avoid
-				// getting trapped in an endless loop of respawns and crashes
-				// if it crashed.
-				if (this.error) throw this.error;
-			}
+		this.process.once('exit', /** @param {any[]} args */ (...args) => {
+			// Clean up the IPC server.
+			this.server.close(() => {
+				// @ts-ignore
+				if (this.server._eventsCount <= 2) {
+					// The child process died before ever opening the IPC
+					// connection and sending any messages over it. Let's avoid
+					// getting trapped in an endless loop of respawns and crashes
+					// if it crashed.
+					if (this.error) throw this.error;
+				}
+
+				this.emit('exit', this, ...args);
+			});
 		});
 
 		this.process.stderr.setEncoding('utf8');
-		this.process.stderr.once('data',
-			/** @param {string} data */
-			data => {
-				this.error = new Error(data);
-			}
-		);
+		this.process.stderr.once('data', /** @param {string} data */ data => {
+			this.error = new Error(data);
+			this.emit('error', this.error);
+		});
 	}
 
 	/**
@@ -508,8 +548,10 @@ function listen(port, bindAddress, workerCount) {
  */
 function killWorker(worker) {
 	let count = Users.socketDisconnectAll(worker);
+	console.log(`${count} connections were lost.`);
 	try {
-		worker.kill();
+		worker.disconnect();
+		worker.kill('SIGTERM');
 	} catch (e) {}
 	workers.delete(worker.id);
 	return count;
