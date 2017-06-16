@@ -316,7 +316,7 @@ func (m *Multiplexer) Handler(s sockjs.Session) {
 	for {
 		msg, err := s.Recv()
 		if err != nil {
-			if err == sockjs.ErrSessionNotOpen && s.GetSessionState() == sockjs.SessionClosed {
+			if err == sockjs.ErrSessionNotOpen {
 				// User disconnected.
 			} else {
 				fmt.Printf("Sockets: SockJS error on message receive for socket of ID %v: %v\n", sid, err)
