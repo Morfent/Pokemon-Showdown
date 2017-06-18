@@ -419,16 +419,25 @@ if (cluster.isWorker) {
 	if (process.env.PSBINDADDR) Config.bindaddress = process.env.PSBINDADDR;
 	if (+process.env.PSNOSSL) Config.ssl = null;
 
+	if (Config.ofe) {
+		try {
+			require.resolve('ofe');
+		} catch (e) {
+			if (e.code !== 'MODULE_NOT_FOUND') throw e; // should never happen
+			throw new Error(
+				'ofe is not installed, but it is a required dependency if Config.ofe is set to true! ' +
+				'Run npm install ofe and restart the server.'
+			);
+		}
+
+		// Create a heapdump if the process runs out of memory.
+		require('ofe').call();
+	}
+
 	// Graceful crash.
 	process.on('uncaughtException', err => {
 		if (Config.crashguard) require('./crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`, true);
 	});
-
-	// This is optional. If ofe is installed, it will take a heapdump if the
-	// process runs out of memory.
-	try {
-		require('ofe').call();
-	} catch (e) {}
 
 	let app = require('http').createServer();
 	/** @type {any} */
@@ -444,54 +453,45 @@ if (cluster.isWorker) {
 		if (key && cert) appssl = require('https').createServer({key, cert});
 	}
 
-	// Launch the static server.
-	let hasNodeStatic = false;
-	try {
-		require.resolve('node-static');
-		hasNodeStatic = true;
-	} catch (e) {}
+	const StaticServer = require('node-static').Server;
+	const roomidRegex = /^\/[A-Za-z0-9][A-Za-z0-9-]*\/?$/;
+	const cssServer = new StaticServer('./config');
+	const avatarServer = new StaticServer('./config/avatars');
+	const staticServer = new StaticServer('./static');
+	/**
+	 * @param {any} req
+	 * @param {any} res
+	 */
+	const staticRequestHandler = (req, res) => {
+		// console.log(`static rq: ${req.socket.remoteAddress}:${req.socket.remotePort} -> ${req.socket.localAddress}:${req.socket.localPort} - ${req.method} ${req.url} ${request.httpVersion} - ${req.rawHeaders.join('|')}`);
+		req.resume();
+		req.addListener('end', () => {
+			if (Config.customhttpresponse &&
+					Config.customhttpresponse(req, res)) {
+				return;
+			}
 
-	if (hasNodeStatic) {
-		const StaticServer = require('node-static').Server;
-		const roomidRegex = /^\/[A-Za-z0-9][A-Za-z0-9-]*\/?$/;
-		const cssServer = new StaticServer('./config');
-		const avatarServer = new StaticServer('./config/avatars');
-		const staticServer = new StaticServer('./static');
-		/**
-		 * @param {any} req
-		 * @param {any} res
-		 */
-		const staticRequestHandler = (req, res) => {
-			// console.log(`static rq: ${req.socket.remoteAddress}:${req.socket.remotePort} -> ${req.socket.localAddress}:${req.socket.localPort} - ${req.method} ${req.url} ${request.httpVersion} - ${req.rawHeaders.join('|')}`);
-			req.resume();
-			req.addListener('end', () => {
-				if (Config.customhttpresponse &&
-						Config.customhttpresponse(req, res)) {
-					return;
+			let server = staticServer;
+			if (req.url === '/custom.css') {
+				server = cssServer;
+			} else if (req.url.startsWith('/avatars/')) {
+				req.url = req.url.substr(8);
+				server = avatarServer;
+			} else if (roomidRegex.test(req.url)) {
+				req.url = '/';
+			}
+
+			server.serve(req, res, e => {
+				// @ts-ignore
+				if (e && e.status === 404) {
+					staticServer.serveFile('404.html', 404, {}, req, res);
 				}
-
-				let server = staticServer;
-				if (req.url === '/custom.css') {
-					server = cssServer;
-				} else if (req.url.startsWith('/avatars/')) {
-					req.url = req.url.substr(8);
-					server = avatarServer;
-				} else if (roomidRegex.test(req.url)) {
-					req.url = '/';
-				}
-
-				server.serve(req, res, e => {
-					// @ts-ignore
-					if (e && e.status === 404) {
-						staticServer.serveFile('404.html', 404, {}, req, res);
-					}
-				});
 			});
-		};
+		});
+	};
 
-		app.on('request', staticRequestHandler);
-		if (appssl) appssl.on('request', staticRequestHandler);
-	}
+	app.on('request', staticRequestHandler);
+	if (appssl) appssl.on('request', staticRequestHandler);
 
 	// Launch the SockJS server.
 	const sockjs = require('sockjs');
