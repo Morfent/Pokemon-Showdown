@@ -25,8 +25,7 @@ import (
 const DELIM byte = '\x03'
 
 type Connection struct {
-	port      string       // Parent process' TCP server's port.
-	addr      *net.TCPAddr // Parent process' TCP server's address.
+	addr      *net.TCPAddr // Parent process' TCP server address.
 	conn      *net.TCPConn // Connection to the parent process' TCP server.
 	mux       *Multiplexer // Target for commands originating from here.
 	listening bool         // Whether or not this is connected and listening for IPC messages.
@@ -39,16 +38,12 @@ func NewConnection(envVar string) (*Connection, error) {
 		return nil, fmt.Errorf("Sockets: failed to parse TCP address to connect to the parent process with: %v", err)
 	}
 
-	// IPv6 is perfectly fine to use here if the machine running this supports
-	// it. The HTTP(S) server can't use it because PS is dependent on user IPs
-	// exclusively being IPv4.
 	conn, err := net.DialTCP("tcp", nil, addr)
 	if err != nil {
 		return nil, fmt.Errorf("Sockets: failed to connect to TCP server: %v", err)
 	}
 
 	c := &Connection{
-		port:      port,
 		addr:      addr,
 		conn:      conn,
 		listening: false,
@@ -70,22 +65,29 @@ func (c *Connection) Listen(mux *Multiplexer) {
 	c.listening = true
 
 	go func() {
-		reader := bufio.NewReader(c.conn)
-		for {
-			var token []byte
-			token, err := reader.ReadBytes(DELIM)
-			if len(token) == 0 || err != nil {
+		scanner := bufio.NewScanner(c.conn)
+		split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+			for i := 0; i < len(data); i++ {
+				if data[i] == DELIM {
+					return i + 1, data[:i], nil
+				}
+			}
+			return 0, data, bufio.ErrFinalToken
+		}
+		scanner.Split(split)
+
+		for scanner.Scan() {
+			var msg string
+			token := scanner.Bytes()
+			err := json.Unmarshal(token, &msg)
+			if err != nil {
 				continue
 			}
 
-			var msg string
-			err = json.Unmarshal(token[:len(token)-1], &msg)
 			cmd := NewCommand(msg, c.mux)
 			CmdQueue <- cmd
 		}
 	}()
-
-	return
 }
 
 // Final step in evaluating commands targeted at the IPC connection.
@@ -96,22 +98,41 @@ func (c *Connection) Process(cmd Command) error {
 	}
 
 	msg := cmd.Message()
-	_, err := c.Write(msg)
+	_, err := c.write(msg)
 	return err
 }
 
 func (c *Connection) Close() error {
+	if !c.listening {
+		return nil
+	}
 	return c.conn.Close()
 }
 
-func (c *Connection) Write(message string) (int, error) {
+func (c *Connection) write(msg string) (int, error) {
 	if !c.listening {
 		return 0, fmt.Errorf("Sockets: can't write messages over a connection that isn't listening yet...")
 	}
 
-	msg, err := json.Marshal(message)
+	data, err := json.Marshal(msg)
 	if err != nil {
 		return 0, fmt.Errorf("Sockets: failed to parse upstream IPC message: %v", err)
 	}
-	return c.conn.Write(append(msg, DELIM))
+
+	var start, count int
+	data = append(data, DELIM)
+	for {
+		count, err = c.conn.Write(data)
+		start += count
+		if err != nil {
+			err = fmt.Errorf("Sockets: failed to write message to IPC connection: %v", err)
+			break
+		}
+
+		if count == 0 || start == len(data) {
+			break
+		}
+	}
+
+	return start, err
 }

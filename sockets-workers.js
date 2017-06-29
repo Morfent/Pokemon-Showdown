@@ -415,8 +415,11 @@ if (cluster.isWorker) {
 	// @ts-ignore
 	global.Config = require('./config/config');
 
+	// @ts-ignore
 	if (process.env.PSPORT) Config.port = +process.env.PSPORT;
+	// @ts-ignore
 	if (process.env.PSBINDADDR) Config.bindaddress = process.env.PSBINDADDR;
+	// @ts-ignore
 	if (+process.env.PSNOSSL) Config.ssl = null;
 
 	if (Config.ofe) {
@@ -497,10 +500,6 @@ if (cluster.isWorker) {
 	const sockjs = require('sockjs');
 	const server = sockjs.createServer({
 		sockjs_url: '//play.pokemonshowdown.com/js/lib/sockjs-1.1.1-nwjsfix.min.js',
-		/**
-		 * @param {string} severity
-		 * @param {string} message
-		 */
 		log(severity, message) {
 			if (severity === 'error') console.error(`Sockets worker SockJS error: ${message}`);
 		},

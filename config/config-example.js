@@ -3,6 +3,24 @@
 // The server port - the port to run Pokemon Showdown under
 exports.port = 8000;
 
+// The server bind address - the address to run Pokemon Showdown under
+//   This should be left set to 0.0.0.0 unless you know what you are doing.
+exports.bindaddress = '0.0.0.0';
+
+// workers - the number of sockets workers to spawn
+//   This should not be set any higher than the number of cores available on
+//   the server's CPU(s). This can be checked from a REPL using
+//   require('os').cpus().length if you are unsure.
+exports.workers = 1;
+
+// golang - toggle using Go instead of Node for sockets workers
+//   Node workers are more unstable at handling connections because of bugs in
+//   sockjs-node, but sending/receiving messages over connections on Go workers
+//   is slightly slower due to the extra work involved in performing IPC with
+//   them safely. This should be left set to false unless you know what you are
+//   doing.
+exports.golang = false;
+
 // proxyip - proxy IPs with trusted X-Forwarded-For headers
 //   This can be either false (meaning not to trust any proxies) or an array
 //   of strings. Each string should be either an IP address or a subnet given
@@ -10,18 +28,11 @@ exports.port = 8000;
 //   know what you are doing.
 exports.proxyip = false;
 
-// ofe - write heapdumps if sockets.js workers run out of memory.
+// ofe - write heapdumps if Node sockets workers run out of memory
 //   If you wish to enable this, you will need to install ofe, as it is not a
 //   installed by default:
 //     $ npm install --no-save ofe
 exports.ofe = false;
-
-// Go language - whether or not to use Go instead of Node.js to host the static
-//	 and SockJS servers. Go is more likely to be more performant than Node.js for
-//	 this purpose, but this should be kept set to false unless you're capable of
-//	 debugging any issues that may arise due to the additional complexity of
-//	 the code needed for this to run.
-exports.golang = false;
 
 // Pokemon of the Day - put a pokemon's name here to make it Pokemon of the Day
 //   The PotD will always be in the #2 slot (not #1 so it won't be a lead)

@@ -10,10 +10,12 @@ func TestMultiplexer(t *testing.T) {
 	port := ":3000"
 	ln, _ := net.Listen("tcp", "localhost"+port)
 	defer ln.Close()
+
 	conn, _ := NewConnection("PS_IPC_PORT")
 	defer conn.Close()
 	mux := NewMultiplexer()
 	mux.Listen(conn)
+	// Do not make the connection listen.
 
 	ts := testSocket{}
 	t.Run("socketAdd", func(t *testing.T) {

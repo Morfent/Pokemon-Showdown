@@ -94,8 +94,6 @@ func (c Command) Message() string {
 	return string(c.token) + c.paramstr
 }
 
-// The command target here is ALWAYS the multiplexer. This is the final step in
-// getting a message parsed, which is after a worker has received this command.
-func (c Command) Process() {
-	c.target.Process(c)
+func (c Command) Process() error {
+	return c.target.Process(c)
 }

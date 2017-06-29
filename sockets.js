@@ -15,10 +15,11 @@
 const child_process = require('child_process');
 const cluster = require('cluster');
 const EventEmitter = require('events');
+const path = require('path');
 
 if (cluster.isMaster) {
 	cluster.setupMaster({
-		exec: require('path').resolve(__dirname, 'sockets-workers'),
+		exec: path.resolve(__dirname, 'sockets-workers'),
 	});
 }
 
@@ -277,7 +278,8 @@ class GoWorker extends EventEmitter {
 		this.exitedAfterDisconnect = undefined;
 
 		/** @type {string[]} */
-		this.buffer = [];
+		this.obuf = [];
+		this.ibuf = '';
 		this.error = null;
 
 		this.process = null;
@@ -318,12 +320,12 @@ class GoWorker extends EventEmitter {
 	 */
 	send(message) {
 		if (!this.isConnected()) {
-			this.buffer.push(message);
+			this.obuf.push(message);
 			return false;
 		}
 
-		if (this.buffer.length) {
-			this.buffer.splice(0).forEach(msg => {
+		if (this.obuf.length) {
+			this.obuf.splice(0).forEach(msg => {
 				this.connection.write(JSON.stringify(msg) + DELIM);
 			});
 		}
@@ -348,12 +350,13 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * Spawns the Go child process. Once the process has started,
-	 * it will make a connection to the worker's TCP server.
+	 * Spawns the Go child process. Once the process has started, it will make
+	 * a connection to the worker's TCP server.
 	 */
 	spawnChild() {
-		let GOPATH = child_process.execSync('go env GOPATH', {stdio: null, encoding: 'utf8'})
-			.trim().split(require('path').delimiter)[0];
+		const GOPATH = child_process.execSync('go env GOPATH', {stdio: null, encoding: 'utf8'})
+			.trim()
+			.split(path.delimiter)[0];
 
 		this.process = child_process.spawn(
 			`${GOPATH}/bin/sockets`, [], {
@@ -396,22 +399,30 @@ class GoWorker extends EventEmitter {
 	}
 
 	/**
-	 * 'connection' event handler for the TCP server. Begins
-	 * the parsing of incoming IPC messages.
+	 * 'connection' event handler for the TCP server. Begins the parsing of
+	 * incoming IPC messages.
 	 * @param {any} connection
 	 */
 	onChildConnect(connection) {
 		this.connection = connection;
 		this.connection.setEncoding('utf8');
-		this.connection.on('data',
-			/** @param {string} data */
-			data => {
-				let messages = data.slice(0, -1).split(DELIM);
-				messages.forEach(message => {
-					this.emit('message', JSON.parse(message));
+		this.connection.on('data', /** @param {string} data */ data => {
+			data.split(DELIM)
+				.slice(0, -1)
+				.forEach(message => {
+					try {
+						if (this.ibuf) {
+							this.emit('message', JSON.parse(this.ibuf + message));
+							this.ibuf = '';
+						} else {
+							this.emit('message', JSON.parse(message));
+						}
+					} catch (e) {
+						// Message is too long for the connection's buffer.
+						this.ibuf += message;
+					}
 				});
-			}
-		);
+		});
 		this.connection.on('error', () => {});
 
 		this.emit('listening');
@@ -461,7 +472,7 @@ function spawnWorker() {
 	} else if (golangCache) {
 		// Prevent spawning multiple Go child processes by accident.
 		for (let [workerid, worker] of workers) { // eslint-disable-line no-unused-vars
-			if (worker.worker instanceof GoWorker) {
+			if (worker.isConnected() && worker.worker instanceof GoWorker) {
 				throw new Error('Sockets: multiple Go child processes cannot be spawned!');
 			}
 		}

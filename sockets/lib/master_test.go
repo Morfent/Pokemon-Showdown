@@ -2,7 +2,8 @@ package sockets
 
 import (
 	"net"
-	"os"
+	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/igm/sockjs-go/sockjs"
@@ -20,15 +21,18 @@ func (ts testSocket) Close(code uint32, signal string) error {
 	return nil
 }
 
+func (ts testSocket) Request() *http.Request {
+	return &http.Request{}
+}
+
 func TestMasterListen(t *testing.T) {
 	t.Parallel()
-	ln, _ := net.Listen("tcp", ":3000")
+	ln, _ := net.Listen("tcp", "localhost:3000")
 	defer ln.Close()
 
-	envVar := "PS_IPC_PORT"
-	os.Setenv(envVar, ":3000")
-	conn, _ := NewConnection(envVar)
+	conn, _ := NewConnection("PS_IPC_PORT")
 	defer conn.Close()
+
 	mux := NewMultiplexer()
 	mux.Listen(conn)
 	conn.Listen(mux)
@@ -38,11 +42,11 @@ func TestMasterListen(t *testing.T) {
 	go m.Listen()
 
 	for i := 0; i < m.count*250; i++ {
-		id := string(i)
+		id := strconv.Itoa(i)
 		t.Run("Worker/Multiplexer command #"+id, func(t *testing.T) {
 			go func(id string, mux *Multiplexer, conn *Connection) {
 				mux.smux.Lock()
-				sid := string(mux.nsid)
+				sid := strconv.FormatUint(mux.nsid, 10)
 				mux.sockets[sid] = testSocket{}
 				mux.nsid++
 				mux.smux.Unlock()
@@ -52,12 +56,16 @@ func TestMasterListen(t *testing.T) {
 				if len(CmdQueue) != 0 {
 					t.Error("Sockets: master failed to pass command struct from worker to multiplexer")
 				}
+
+				mux.socketRemove(sid, true)
 			}(id, mux, conn)
 		})
 		t.Run("Worker/Connection command #"+id, func(t *testing.T) {
 			go func(id string, mux *Multiplexer, conn *Connection) {
 				mux.smux.Lock()
-				sid := string(mux.nsid)
+				sid := strconv.FormatUint(mux.nsid, 10)
+				mux.sockets[sid] = testSocket{}
+				mux.nsid++
 				mux.smux.Unlock()
 
 				cmd := BuildCommand(SOCKET_CONNECT, sid+"\n0.0.0.0\n\nwebsocket", conn)
@@ -65,6 +73,8 @@ func TestMasterListen(t *testing.T) {
 				if len(CmdQueue) != 0 {
 					t.Error("Sockets: master failed to pass command struct from worker to connection")
 				}
+
+				mux.socketRemove(sid, true)
 			}(id, mux, conn)
 		})
 	}
