@@ -2,7 +2,22 @@ sudo: false
 language: node_js
 node_js:
   - "7.7"
+go:
+  - "1.6"
 cache:
   directories:
     - node_modules
     - .eslintcache
+    - ~/go/src
+install:
+  - export GOPATH=~/go
+  - go get github.com/igm/sockjs-go/sockjs
+  - go get github.com/gorilla/mux
+  - mkdir -p $GOPATH/src/github.com/Zarel/Pokemon-Showdown/sockets/lib
+  - ln -s sockets/main.go $GOPATH/src/github.com/Zarel/Pokemon-Showdown/sockets/main.go
+  - ln -s sockets/lib/* $GOPATH/src/github.com/Zarel/Pokemon-Showdown/sockets/lib
+  - go install github.com/Zarel/Pokemon-Showdown/sockets
+  - npm install
+script:
+  - go test github.com/Zarel/Pokemon-Showdown/sockets/lib
+  - npm test
